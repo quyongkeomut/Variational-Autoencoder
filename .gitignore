@@ -1,4 +1,6 @@
 data*/
+/ Do not ignore the 'datasets' folder
+!datasets/
 env/
 docs/
 __pycache__/
