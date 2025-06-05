@@ -42,6 +42,8 @@ class DownBlock(Module):
         super().__init__()
         
         invert_residual_kwargs = {
+            "in_channels": out_channels,
+            "out_channels": out_channels,
             "expand_factor": expand_factor, 
             "num_groups_norm": num_groups_norm, 
             "activation": activation,
@@ -50,7 +52,8 @@ class DownBlock(Module):
         factory_kwargs = {"device": device, "dtype": dtype}
         self.initializer = _get_initializer(initializer)
         
-        layers = [        
+        layers = [       
+            # depthwise conv for downsampling 
             Conv2d(
                 in_channels, 
                 in_channels,
@@ -59,8 +62,10 @@ class DownBlock(Module):
                 padding=(1, 1),
                 groups=in_channels,
                 **factory_kwargs
-            ),
+            ), 
             get_activation(activation),
+            
+            # pointwise conv for projection
             Conv2d(
                 in_channels, 
                 out_channels,
@@ -69,8 +74,10 @@ class DownBlock(Module):
             ),
             get_activation(activation),
             
-            SeparableInvertResidual(out_channels, out_channels, **invert_residual_kwargs, **factory_kwargs),
-            SeparableInvertResidual(out_channels, out_channels, **invert_residual_kwargs, **factory_kwargs),
+            # main layers
+            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
+            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
+            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
         ]
             
         self.layers = Sequential(*layers)
@@ -118,6 +125,8 @@ class UpBlock(Module):
         super().__init__()
         
         invert_residual_kwargs = {
+            "in_channels": out_channels,
+            "out_channels": out_channels,
             "expand_factor": expand_factor, 
             "num_groups_norm": num_groups_norm, 
             "activation": activation,
@@ -127,6 +136,7 @@ class UpBlock(Module):
         self.initializer = _get_initializer(initializer)
         
         layers = [
+            # pointwise conv for projection
             Conv2d(
                 in_channels, 
                 out_channels,
@@ -134,6 +144,8 @@ class UpBlock(Module):
                 **factory_kwargs
             ),
             get_activation(activation),
+            
+            # depthwise conv
             Conv2d(
                 in_channels=out_channels, 
                 out_channels=out_channels,
@@ -145,8 +157,9 @@ class UpBlock(Module):
             get_activation(activation),
             
             Upsample(scale_factor=2, mode="bilinear"),
-            SeparableInvertResidual(out_channels, out_channels, **invert_residual_kwargs, **factory_kwargs),
-            SeparableInvertResidual(out_channels, out_channels, **invert_residual_kwargs, **factory_kwargs),
+            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
+            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
+            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
         ]
             
         self.layers = Sequential(*layers)
