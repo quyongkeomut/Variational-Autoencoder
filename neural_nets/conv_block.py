@@ -6,7 +6,8 @@ from torch.nn import (
     Module,
     Sequential,
     Conv2d,
-    GroupNorm
+    GroupNorm,
+    Dropout
 )
 
 from neural_nets.activations import get_activation
@@ -22,20 +23,25 @@ class SeparableInvertResidual(Module):
         expand_factor: int,
         stride: int = 1,
         num_groups_norm: int = 4,
+        drop_p: float = 0.3,
         activation: str = "swish",
         initializer: str | Callable[[Tensor], Tensor] = "he_uniform",
         device=None,
-        dtype=None
+        dtype=None,
+        *args,
+        **kwargs
     ):
         r"""
         Implementation of Inverted Residual block, which is introduced in MobileNetv2.
 
         Args:
-            in_channels (int): number of channels of input.
-            out_channels (int): number of channels of output.
-            expand_factor (int, optional): Expand factor of the first pointwise conv. Defaults to 3.
+            in_channels (int): Number of channels of input.
+            out_channels (int): Number of channels of output.
+            expand_factor (int, optional): Expand factor of the first pointwise conv.
+                Defaults to 3.
             num_groups_norm (int, optional): Number of group for GN layer. Defaults to 4.
-            activation (str, optional): Name of nonlinear activation function. Defaults to "swish".
+            activation (str, optional): Type of nonlinear activation function.
+                Defaults to "swish".
         """
         super().__init__() 
         
@@ -49,23 +55,25 @@ class SeparableInvertResidual(Module):
         
         # pointwise
         expansion = [
+            Dropout(drop_p),
             Conv2d(
                in_channels=in_channels, 
                out_channels=expand_channels,
                kernel_size=1,
                **factory_kwargs
             ),
-            get_activation(activation),
             GroupNorm(
                 num_groups=num_groups_norm,
                 num_channels=expand_channels,
                 **factory_kwargs
             ),
+            get_activation(activation),
         ]
         self.expansion = Sequential(*expansion)
         
         # depthwise
         depthwise = [
+            Dropout(drop_p),
             Conv2d(
                 in_channels=expand_channels, 
                 out_channels=expand_channels,
@@ -75,17 +83,18 @@ class SeparableInvertResidual(Module):
                 groups=expand_channels,
                 **factory_kwargs
             ),
-            get_activation(activation),
             GroupNorm(
                 num_groups=num_groups_norm,
                 num_channels=expand_channels,
                 **factory_kwargs
             ),
+            get_activation(activation),
         ]
         self.depthwise = Sequential(*depthwise)
         
         # pointwise
         projection = [
+            Dropout(drop_p),
             Conv2d(
                 in_channels=expand_channels, 
                 out_channels=out_channels,
