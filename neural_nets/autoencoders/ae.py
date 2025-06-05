@@ -27,7 +27,7 @@ class Encoder(Module):
         self,
         img_channels: int,
         down_channels: Sequence[int],
-        expand_factor: int = 3,
+        expand_factor: int,
         num_groups_norm: int = 4,
         activation: str = "hardswish",
         device=None,
@@ -36,6 +36,19 @@ class Encoder(Module):
         *args,
         **kwargs
     ):
+        """
+        Base Encoder
+
+        Args:
+            img_channels (int): Number of channels of input image. 
+            down_channels (Sequence[int]): Sequence of channels along stages of Encoder
+            expand_factor (int, optional): Coeficient which is used to expand number of channels.
+            num_groups_norm (int, optional): Number of group for GN layer. Defaults to 4.
+            activation (str, optional): Type of nonlinear activation function. 
+                Defaults to "hardswish".
+            initializer (str | Callable[[Tensor], Tensor], optional): Type of weight initializer. 
+                Defaults to "he_uniform".
+        """
         super().__init__()
         
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -82,14 +95,6 @@ class Encoder(Module):
                 )
             )
         
-        # latent layer
-        layers.append(
-            SeparableInvertResidual(
-                down_channels_per_stage[stage_i + 1], 
-                down_channels_per_stage[stage_i + 1], 
-                **invert_residual_kwargs, **factory_kwargs),
-        )
-        
         self.layers = Sequential(*layers)
         # self._reset_parameters()
     
@@ -112,10 +117,16 @@ class VAEEncoder(Encoder):
         H, W = kwargs["latent_shape"]
         self.lattent_dim = H*W * self.last_dim
         
-        # append the µ and σ2 layers
+        # append the µ and log(σ2) layers
         self.mean = Sequential(
             Linear(
                 in_features=self.last_dim,
+                out_features=self.lattent_dim,
+                **self.factory_kwargs
+            ),
+            get_activation(self.activation),
+            Linear(
+                in_features=self.lattent_dim,
                 out_features=self.lattent_dim,
                 **self.factory_kwargs
             ),
@@ -123,6 +134,12 @@ class VAEEncoder(Encoder):
         self.log_var = Sequential(
             Linear(
                 in_features=self.last_dim,
+                out_features=self.lattent_dim,
+                **self.factory_kwargs
+            ),
+            get_activation(self.activation),
+            Linear(
+                in_features=self.lattent_dim,
                 out_features=self.lattent_dim,
                 **self.factory_kwargs
             ),
@@ -134,9 +151,13 @@ class VAEEncoder(Encoder):
         super()._reset_parameters()
         self.initializer(self.mean[0].weight)
         self.initializer(self.log_var[0].weight)
+        self.initializer(self.mean[2].weight)
+        self.initializer(self.log_var[2].weight)
     
         ones_(self.mean[0].bias)
         ones_(self.log_var[0].bias)
+        ones_(self.mean[2].bias)
+        ones_(self.log_var[2].bias)
     
 
     def forward(self, input: Tensor) -> Tuple[Tensor, Tensor]:
@@ -154,7 +175,7 @@ class Decoder(Module):
         img_channels: int,
         latent_channels: int,
         up_channels: Sequence[int],
-        expand_factor: int = 3,
+        expand_factor: int,
         num_groups_norm: int = 4,
         activation: str = "hardswish",
         initializer: str | Callable[[Tensor], Tensor] = "he_uniform",
@@ -163,6 +184,20 @@ class Decoder(Module):
         *args,
         **kwargs,
     ):
+        """
+        Base Decoder
+
+        Args:
+            img_channels (int): Number of channels of input image
+            latent_channels (int): _description_
+            up_channels (Sequence[int]): Sequence of channels along stages of Decoder
+            expand_factor (int, optional): Coeficient which is used to expand number of channels.
+            num_groups_norm (int, optional): Number of group for GN layer. Defaults to 4.
+            activation (str, optional): Type of nonlinear activation function. 
+                Defaults to "hardswish".
+            initializer (str | Callable[[Tensor], Tensor], optional): Type of weight initializer. 
+                Defaults to "he_uniform".
+        """
         super().__init__()
         
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -187,7 +222,8 @@ class Decoder(Module):
         # stem block - stride = 0
         projection = [
             Conv2d(latent_channels, up_channels[0], 1, **factory_kwargs),
-            GroupNorm(num_groups_norm, up_channels[0], **factory_kwargs)
+            GroupNorm(num_groups_norm, up_channels[0], **factory_kwargs),
+            get_activation(activation)
         ]
         layers.extend(projection)
         
@@ -207,8 +243,23 @@ class Decoder(Module):
         # out layer
         layers.append(
             Sequential(
-                Conv2d(up_channels[-1], img_channels, kernel_size=1, **factory_kwargs),
-                # get_activation("sigmoid")
+                # depthwise
+                Conv2d(
+                    in_channels=up_channels[-1], 
+                    out_channels=up_channels[-1], 
+                    kernel_size=1, 
+                    groups=up_channels[-1],
+                    **factory_kwargs
+                ),
+                get_activation(activation),
+                
+                # pointwise
+                Conv2d(
+                    up_channels[-1], 
+                    img_channels, 
+                    kernel_size=1, 
+                    **factory_kwargs
+                ),
             )
         )
         
@@ -218,10 +269,13 @@ class Decoder(Module):
     
     def _reset_parameters(self):
         self.initializer(self.layers[0].weight)   
-        self.initializer(self.layers[-1][0].weight)        
+        self.initializer(self.layers[-1][0].weight)
+        self.initializer(self.layers[-1][2].weight)        
+        
         if self.layers[0].bias is not None:
             ones_(self.layers[0].bias)
-            ones_(self.layers[-1][0].bias)     
+            ones_(self.layers[-1][0].bias)
+            ones_(self.layers[-1][2].bias)     
     
     
     def forward(
