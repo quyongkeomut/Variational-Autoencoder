@@ -56,14 +56,14 @@ class HardSwish(Module):
     
 ACTIVATIONS = {
     "sigmoid": Sigmoid,
-    "tanh": Tanh,
     "hardsigmoid": Hardsigmoid,
+    "tanh": Tanh,
+    "swish": Swish,
+    "hardswish": HardSwish,
     "relu": ReLU,
     "relu6": ReLU6,
     "selu": SELU,
     "gelu": GELU,
-    "swish": Swish,
-    "hardswish": HardSwish
 }
 
 
