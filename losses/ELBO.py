@@ -17,18 +17,24 @@ class ELBOLoss(Module):
     def __init__(
         self, 
         M: int = 16,
+        beta: float = 1.0,
         epsilon: float = 1e-5,
         *args, 
         **kwargs
-    ):
+    ) -> None:
         """
-        Implementation of ELBO (Evidence Lower-Bound)
-
+        Implementation of ELBO (Evidence Lower-Bound) and it variant beta-VAE (β-VAE)
+        
         Args:
-            M (int): Number of samples for the Monte-Carlo estimation of Reconstruction part
+            M (int, optional): Number of samples for the Monte-Carlo estimation. 
+                Defaults to 16.
+            beta (float, optional): Scaling scalar for the Prior matching part of the 
+                total loss function. Defaults to 1.0.
+            epsilon (float, optional): Smoothing value. Defaults to 1e-5.
         """
         super().__init__(*args, **kwargs)
         self.M = M
+        self.beta = beta
         self.epsilon = epsilon
         
         
@@ -99,7 +105,7 @@ class ELBOLoss(Module):
         shape_MC = (self.M, N, C, H, W)        
         target = target.unsqueeze(0).expand(shape_MC).reshape(self.M*N, C, H, W) # (M*N, C, H, W)
         
-        # create Monte-Carlo latent vectors
+        # create Monte Carlo estimation of latent vectors
         noise_MC = randn_like(mean.expand(self.M, -1, -1)) # (M, N, d)
         latent_MC = mean + exp(log_var / 2)*noise_MC # (M, N, d)
         latent_MC = latent_MC.view(self.M*N, latent_MC.size(-1)) # (M*N, d)
@@ -123,6 +129,6 @@ class ELBOLoss(Module):
             X_input (Tensor): Input data
 
         Returns:
-            Tensor: _description_
+            Tensor: Scalar value of ELBO Loss
         """
-        return self._prior_matching(*stats) + self._reconstruction(decoder, stats, X_input)
+        return self.beta*self._prior_matching(*stats) + self._reconstruction(decoder, stats, X_input)
