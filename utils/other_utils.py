@@ -7,7 +7,6 @@ from torch.nn.modules.utils import _pair
 import torchvision.transforms as transforms
 
 
-
 def save_animation(
     xs, 
     gif_name, 
