@@ -5,19 +5,20 @@ import numpy as np
 
 import torch
 import torch.multiprocessing as mp
-import torch.nn.functional as F
 from torch.nn.modules.utils import _pair
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed import init_process_group, destroy_process_group
-from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 
 from neural_nets.autoencoders.trainer import AETrainer
-from neural_nets.autoencoders.ae import VAEEncoder, VAEDecoder
+from neural_nets.autoencoders.vae import (
+    VAEEncoder, 
+    VAEDecoder,
+    PRE_H,
+    PRE_W
+)
 
 from optimizer.optimizer import OPTIMIZERS
-
-from augmentation.augmentation import CustomAug
 
 
 NUM_DEVICE = torch.cuda.device_count()
@@ -31,7 +32,6 @@ def get_args() -> None:
         None
     """
     import argparse
-
     parser = argparse.ArgumentParser(description='Training args')
 
     # task
@@ -42,7 +42,7 @@ def get_args() -> None:
     
     # DDP (Distributed Data Parallel) option
     parser.add_argument(
-        '--is_dpp', action="store_true", 
+        '--is_ddp', action="store_true", 
         help='Option for choosing training in DDP or normal training criteria'
     )
     
@@ -51,12 +51,24 @@ def get_args() -> None:
     
     # standard deviation of Decoder
     parser.add_argument(
-        '--std_dec', type=float, default=1, 
-        help='Standard deviation of decoder'
+        '--beta', type=float, default=1, 
+        help='Beta coeficient of Beta-VAE'
+    )
+    
+    # Learning rate
+    parser.add_argument(
+        '--lr', type=float, default=1e-3, 
+        help='Learning rate'
+    )
+    
+    # Number of Monte Carlo samples
+    parser.add_argument(
+        '--MC', type=int, default=1, 
+        help='Number of Monte Carlo samples'
     )
     
     # Number of training epochs
-    parser.add_argument('--epochs', type=int, default=10, help='Num epochs')
+    parser.add_argument('--epochs', type=int, default=50, help='Num epochs')
     
     # Batch size
     parser.add_argument('--batch', type=int, default=32, help='Batch size')
@@ -75,9 +87,7 @@ def get_args() -> None:
         '--ckpt_decoder', nargs='?', default = None,
         help='Checkpoint of pretrained decoder for coutinue training'
     )
-
     args = parser.parse_args()
-    
     return args
 
 
@@ -122,7 +132,7 @@ def set_env() -> None:
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     # os.environ["TORCH_LOGS"] = "+dynamo"
     # os.environ["TORCHDYNAMO_VERBOSE"] = "1"
-    # os.environ["CUDA_LAUNCH_BLOCKING"] = "1" # for debugging
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1" # for debugging
     os.environ["TORCHDYNAMO_DYNAMIC_SHAPES"] = "0"
 
     # The flags below controls whether to allow TF32 on cuda and cuDNN
@@ -146,7 +156,9 @@ def main(
     is_ddp: bool,
     task: str,
     img_size: int | tuple,
-    std_dec: float,
+    beta: float,
+    lr: float,
+    MC: int,
     num_epochs: int,
     batch_size: int,
     ckpt_encoder,
@@ -161,8 +173,10 @@ def main(
         world_size (int): Number of device.
         is_ddp (bool): Whether the training setting is DDP or normal criteria.
         task (str): Task to train the model on.
+        beta (float): Beta coeficient for Beta-VAE.
+        lr (float): Learning rate
+        MC (int): Number of Monte Carlo samples for the Reconstruction loss.
         img_size (int | tuple): Image size.
-        std_dec (float): Standard deviation of the decoder distribution.
         num_epochs (int): Number of training epoch.
         batch_size (int): Batch size.
         ckpt_encoder (_type_): Checkpoint of encoder to continue the training process.
@@ -182,6 +196,7 @@ def main(
                 OPTIMIZER_NAME,
                 OPTIM_ARGS
             )
+            from augmentation.augmentation import CustomAug
             TRAIN_DS = Flowers102AE(transform=CustomAug(img_size), split="train")
             VAL_DS = Flowers102AE(transform=CustomAug(img_size), split="val")
             TEST_DS = Flowers102AE(transform=CustomAug(img_size), split="test")
@@ -215,7 +230,6 @@ def main(
     ):
         latent_shape = _pair(img_size//8)
         decoder = VAEDecoder(
-            std_dec=std_dec, 
             **AE_CONFIGS["decoder"], 
             device=rank
         )
@@ -229,6 +243,7 @@ def main(
                 {"params": encoder.parameters()},
                 {"params": decoder.parameters()},
             ],
+            lr=lr,
             **OPTIM_ARGS,
         )
 
@@ -246,7 +261,6 @@ def main(
         decoder.compile(fullgraph=True, backend=backend)
         return encoder, decoder, optimizer
         
-    
     if is_ddp:
         set_ddp(rank, world_size)
     
@@ -256,46 +270,46 @@ def main(
     IS_PIN_MEMORY = True
     NUM_WORKERS = 4
     
-    out_dir = os.path.join("./weights/VAEweights", task)
+    # out_dir = os.path.join("./weights/VAEweights", task)
+    out_dir = os.path.join("/kaggle/working/weights/VAEweights", task)
 
     # initialize the encoder, decoder and optimizer
-    encoder, decoder, optimizer = _get_modules(
-        img_size, 
-        ckpt_encoder,
-        ckpt_decoder
-    )
+    encoder, decoder, optimizer = _get_modules(img_size, ckpt_encoder, ckpt_decoder)
     
     # setup dataloaders
+    train_loader_args = {
+        "dataset": TRAIN_DS, 
+        "batch_size": batch_size, 
+        "num_workers": NUM_WORKERS,
+        "drop_last": True,
+        "pin_memory": IS_PIN_MEMORY
+    }
     if is_ddp:
         train_loader = DataLoader(
-            TRAIN_DS, 
-            batch_size=batch_size, 
             shuffle=False, 
             sampler=DistributedSampler(TRAIN_DS),
-            num_workers=NUM_WORKERS,
-            drop_last=True,
-            pin_memory=IS_PIN_MEMORY
+            **train_loader_args
         )
     else:
         train_loader = DataLoader(
-            TRAIN_DS, 
-            batch_size=batch_size, 
             shuffle=True, 
-            num_workers=NUM_WORKERS,
-            drop_last=True,
-            pin_memory=IS_PIN_MEMORY
+            **train_loader_args
         )
 
     # setup the trainer
     from losses.ELBO import ELBOLoss
     
+    latent_dim = AE_CONFIGS["decoder"]["latent_channels"] * PRE_H * PRE_W
     last_epoch = 0
     lr_scheduler_cosine = None
-    criterion = ELBOLoss(M=16)
+    criterion = ELBOLoss(M=MC, beta=beta)
     trainer = AETrainer(
+        is_ddp=is_ddp,
         encoder=encoder,
         decoder=decoder,
+        latent_dim=latent_dim,
         task=task,
+        base_lr=lr,
         criterion=criterion,
         optimizer=optimizer,
         num_epochs=num_epochs,
@@ -323,7 +337,9 @@ if __name__ == "__main__":
     task = args.task
     is_ddp = args.is_ddp
     img_size = args.img_size
-    std_dec = args.std_dec
+    beta = args.beta
+    lr = args.lr
+    MC = args.MC
     num_epochs = args.epochs
     batch_size = args.batch
     seed = args.seed
@@ -337,7 +353,9 @@ if __name__ == "__main__":
         is_ddp,
         task, 
         img_size, 
-        std_dec,
+        beta,
+        lr,
+        MC,
         num_epochs, 
         batch_size, 
         ckpt_encoder,
@@ -347,4 +365,4 @@ if __name__ == "__main__":
     if is_ddp:
         mp.spawn(main, args=args, nprocs=world_size)
     else:
-        main(rank=0, *args)
+        main(0, *args)
