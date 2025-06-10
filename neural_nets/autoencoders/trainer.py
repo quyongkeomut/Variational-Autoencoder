@@ -12,9 +12,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 
-AVG_WEIGHT = 0.999
-today = datetime.today()
-formatted_today = today.strftime('%Y_%m_%d_%H_%M')
+from utils.other_utils import show_animation
+
+AVG_WEIGHT = 0.99
+ANIMATION_SIZE = 32
+TODAY = datetime.today()
+FORMATTED_TODAY = TODAY.strftime('%Y_%m_%d_%H_%M')
 
 
 class AETrainer:
@@ -23,6 +26,7 @@ class AETrainer:
         is_ddp: bool,
         encoder: Type[Module],
         decoder: Type[Module],
+        latent_dim: int,
         task: str,
         base_lr: float,
         criterion,
@@ -35,23 +39,29 @@ class AETrainer:
         lr_scheduler_cosine: Optional[CosineAnnealingLR] = None,
         gpu_id: int = 0
     ) -> None:
-        
-        r"""
-        _summary_
+        """
+        Variational Autoencoder Trainer
 
         Args:
-            model (Type[Module]): _description_
-            model_name (str): _description_
-            criterion (_type_): _description_
-            optimizer (_type_): _description_
-            num_epochs (int): _description_
-            start_epoch (int, optional): _description_. Defaults to 0.
-            train_loader (_type_, optional): _description_. Defaults to None.
-            out_dir (str, optional): _description_. Defaults to "./weights/AEweights".
-            lr_scheduler_cosine (Optional[CosineAnnealingLR], optional): _description_. Defaults to None.
+            is_ddp (bool): Decide whether the training setting is DDP or normal criteria. 
+            encoder (Type[Module]): The encoder.
+            decoder (Type[Module]): The decoder.
+            latent_dim (int): Dimension of latent vector.
+            task (str): Task to train the model on.
+            base_lr (float): Baseline learning rate.
+            criterion (_type_): Loss function.
+            optimizer (_type_): Parameter optimizer.
+            num_epochs (int): Number of training epochs.
+            start_epoch (int, optional): Start epoch index. Defaults to 0.
+            save_encoder (bool, optional): Decide whether saving the encoder. Defaults to False.
+            train_loader (_type_, optional): Decide whether saving the decoder. Defaults to None.
+            out_dir (str, optional): Folder to save the weights. Defaults to "./weights/AEweights".
+            lr_scheduler_cosine (Optional[CosineAnnealingLR], optional): Learning rate scheduler. 
+                Defaults to None.
+            gpu_id (int, optional): GPU index. Defaults to 0.
         """
-
         self.task = task
+        self.latent_dim = latent_dim
         self.is_ddp = is_ddp 
         self.gpu_id = gpu_id
         self.base_lr = base_lr
@@ -71,14 +81,13 @@ class AETrainer:
         self.train_loader = train_loader
         
         # setup paths to save model
-        self.out_path = os.path.join(out_dir, formatted_today)
-        self.decoder_out_path = os.path.join(out_dir, formatted_today, "decoder", )
+        self.out_path = os.path.join(out_dir, FORMATTED_TODAY)
+        self.decoder_out_path = os.path.join(out_dir, FORMATTED_TODAY, "decoder", )
         os.makedirs(self.decoder_out_path, exist_ok=True)
         if save_encoder:
-            self.encoder_out_path = os.path.join(out_dir, formatted_today, "encoder", )
+            self.encoder_out_path = os.path.join(out_dir, FORMATTED_TODAY, "encoder", )
             os.makedirs(self.encoder_out_path, exist_ok=True)
         
-
     def _setup_encoder_decoder(self):
         if self.is_ddp:
             self.encoder: DDP = DDP(
@@ -109,7 +118,6 @@ class AETrainer:
                     multi_avg_fn=get_ema_multi_avg_fn(AVG_WEIGHT)
                 )
     
-    
     def _setup_criterion_optim_scheduler(
         self,
         criterion,
@@ -128,7 +136,6 @@ class AETrainer:
         else:
             self.lr_scheduler_cosine = lr_scheduler_cosine
     
-    
     def _save_modules(
         self, 
         epoch,
@@ -143,7 +150,6 @@ class AETrainer:
             "lr_cosine_state_dict": scheduler_state_dict,
         }, save_path)
     
-    
     def fit(self):
         r"""
         Perform fitting loop and validation
@@ -154,16 +160,15 @@ class AETrainer:
             with open(train_csv_path, mode='w+', newline='') as train_csvfile:
                 train_writer = csv.writer(train_csvfile)
                 train_writer.writerow(['Epoch', 'Loss'])
-        
         # Fitting loop
         for epoch in range(self.start_epoch, self.num_epochs):
             # Train
             train_metrics = self.train(epoch=epoch)
+            # self.eval(epoch=epoch)
             if self.gpu_id == 0:
                 with open(train_csv_path, mode='a', newline='') as train_csvfile:
                     train_writer = csv.writer(train_csvfile)
                     train_writer.writerow(train_metrics)
-            
             # lr schedulers step
             self.lr_scheduler_cosine.step()
             torch.cuda.empty_cache()
@@ -186,8 +191,7 @@ class AETrainer:
                 )
                 self._save_modules(self.num_epochs, save_path, *encoder_state_dicts)
      
-     
-    def _run_one_step(self, data) :
+    def _run_one_step(self, data):
         # clear gradient
         self.encoder.zero_grad(set_to_none=True)
         self.decoder.zero_grad(set_to_none=True)
@@ -198,7 +202,7 @@ class AETrainer:
             targets = inputs
         else:
             targets = data[1].to(self.gpu_id)
-                                
+            
         # compute output, loss and metrics
         with nullcontext() if self.save_encoder else torch.no_grad():
             stats = self.encoder(inputs)
@@ -206,14 +210,13 @@ class AETrainer:
         _loss = self.criterion(self.decoder, stats, targets)
         return _loss
         
-
     def train(self, epoch):
         self.decoder.train()
         if self.save_encoder:
             self.encoder.train()
         else:
             self.encoder.eval()
-        ema_loss = 0
+        ema_loss = 0.0
         
         if self.gpu_id == 0:
             print(f"TRAINING PHASE EPOCH: {epoch+1}")
@@ -234,9 +237,14 @@ class AETrainer:
                     pbar.update(1)  # Increase the progress bar
                     
                     # update ema model 
-                    self.ema_decoder.update_parameters(self.decoder) #self.decoder.module)
-                    if self.save_encoder:
-                        self.ema_encoder.update_parameters(self.encoder) #self.encoder.module)
+                    if self.is_ddp:
+                        self.ema_decoder.update_parameters(self.decoder.module)
+                        if self.save_encoder:
+                            self.ema_encoder.update_parameters(self.encoder.module)
+                    else:
+                        self.ema_decoder.update_parameters(self.decoder)
+                        if self.save_encoder:
+                            self.ema_encoder.update_parameters(self.encoder)
                     
                     # save this step for backup...
                     save_path = os.path.join(self.decoder_out_path, "decoder_last.pth")
@@ -264,91 +272,18 @@ class AETrainer:
 
         # calculate averaged loss
         loss = ema_loss
-        print(f'Epoch {epoch+1} Loss: {loss:4f}')
-        print()
-
+        if self.gpu_id == 0:
+            print(f'Epoch {epoch+1} Loss: {loss:4f}')
+            print()
         return [epoch + 1, f"{loss:4f}"]
 
-
-    """ @torch.inference_mode()
-    def val(self, epoch):
-        self.criterion.running_loss = 0.
-        self.model.eval()
-        ema_loss = 0
-        print(F"VALIDATION PHASE EPOCH: {epoch+1}")
-        with tqdm.tqdm(total=len(self.val_loader), desc=f'Epoch {epoch+1}/{self.num_epochs}', unit='batch') as pbar:
-            for data in self.val_loader:
-                # get data
-                inputs = data[0].to(self.device)
-                targets = data[1]
-                targets = torch.nn.functional.one_hot(targets, num_classes=self.num_classes)
-
-                targets = targets.permute(0, 3, 1, 2)
-                
-                targets = targets.to(self.device)
-                
-                # compute output, loss and metrics
-                outputs = self.model(inputs)
-
-                _loss = self.criterion(outputs, targets)
-
-                # Convert to numpy
-                outputs = torch.argmax(outputs, dim=1).cpu().detach().numpy()
-                targets =  torch.argmax(targets, dim=1).cpu().detach().numpy()
-
-                self.metrics.addBatch(outputs, targets)
-
-                
-                # calculate metrics of each task
-                acc = self.metrics.pixelAccuracy()
-                IoU = self.metrics.IntersectionOverUnion()
-                mIoU = self.metrics.meanIntersectionOverUnion()
-
-
-                metrics = {
-                    "mIoU" : mIoU,
-                    "IoU" : IoU,
-                    "Acc" : acc
-                }
-                
-                # update ema model 
-                self.ema_model.update_parameters(self.model)
-
-                # update progress bar
-                ema_loss = 0.9*ema_loss + 0.1*_loss.item()
-                pbar.set_postfix(loss=ema_loss, **metrics)
-                pbar.update(1)  # Increase the progress bar
-                
-                # clear cache
-                # torch.cuda.empty_cache()
-                # gc.collect()
-                # break
-
-        # calculate averaged loss
-        loss = ema_loss
-        print(f'Epoch {epoch+1} Loss: {loss:4f}')
-        print()
-        
-        # save the best model on IoU metric
-        current_IoU = mIoU 
-        if current_IoU >= self.best_IoU:
-            files_to_delete = glob.glob(os.path.join(self.out_path, 'best_*'))
-            for file_path in files_to_delete:
-                os.remove(file_path)
-
-            save_path = os.path.join(self.out_path, f"best_IoU_{round(current_IoU,4)}_epoch_{epoch + 1}.pth")
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": self.model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "lr_cosine_state_dict": self.lr_scheduler_cosine.state_dict(),
-                "loss": loss,
-                "metrics": metrics
-                }, save_path)
-            
-            self.best_IoU = current_IoU
-
-        # reset metrics tracker after every validating epoch
-        self.metrics.reset()
-        
-        return [epoch + 1, f"{loss:4f}", f"{acc:4f}", f"{IoU:4f}", f"{mIoU:4f}"]"""
+    @torch.no_grad()
+    def eval(self, epoch):
+        if self.gpu_id == 0:
+            print(f"EVALUATION RESULTS EPOCH: {epoch+1}")
+            self.decoder.eval()
+            results = []
+            for i in range(ANIMATION_SIZE):
+                latent = torch.randn(1, self.latent_dim, device=0)
+                results.append(self.decoder(latent))
+            return show_animation(results)
