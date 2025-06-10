@@ -1,5 +1,4 @@
-OUT_CHANNELS = 21
+OUT_CHANNELS = 10
 OPTIMIZER_NAME: str = "adamw"
 OPTIM_ARGS = {
-    "lr": 1e-3,
 }
