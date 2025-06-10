@@ -1,20 +1,22 @@
 ENCODER_CONFIGS = {
     "img_channels": 3,
-    "down_channels": (16, 32, 64),
+    "down_channels": (32, 64, 128, 256, 512),
     "expand_factor": 2,
-    "num_groups_norm": 4,
+    "drop_p": 0.4,
+    "num_groups_norm": 8,
     "activation": "swish",
     "dtype": None,
 }
 
 DECODER_CONFIGS = {
     "img_channels": 3,
-    "latent_channels": 64,
-    "up_channels": (56, 32, 24),
+    "latent_channels": 512,
+    "up_channels": (256, 128, 64, 32),
     "expand_factor": 2,
-    "num_groups_norm": 4,
+    "drop_p": 0.3,
+    "num_groups_norm": 8,
     "activation": "swish",
-    "latent_shape": (6, 6),
+    "latent_shape": (8, 8),
     "dtype": None,
 }
 
