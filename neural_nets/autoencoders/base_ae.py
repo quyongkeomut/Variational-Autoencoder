@@ -1,6 +1,5 @@
 from typing import (
     Sequence,
-    Tuple,
     Callable
 )
     
@@ -11,15 +10,16 @@ from torch.nn import (
     Sequential,
     Conv2d,
     GroupNorm,
-    Linear
+    ConvTranspose2d
 )
-from torch.nn.functional import avg_pool2d
 
-from neural_nets.conv_block import SeparableInvertResidual
 from neural_nets.activations import get_activation
 from neural_nets.autoencoders.constituent_blocks import DownBlock, UpBlock
 
 from utils.initializers import _get_initializer, ones_
+
+
+PRE_H, PRE_W = 2, 2
 
 
 class Encoder(Module):
@@ -52,6 +52,10 @@ class Encoder(Module):
         super().__init__()
         
         factory_kwargs = {"device": device, "dtype": dtype}
+        self.last_dim = down_channels[-1]
+        self.pre_latent_dim = PRE_H * PRE_W * self.last_dim
+        self.pre_latent_shape = (PRE_H, PRE_W)
+        
         self.activation = activation
         self.factory_kwargs = factory_kwargs
         self.down_channels = down_channels
@@ -64,9 +68,7 @@ class Encoder(Module):
         }
         self.initializer = _get_initializer(initializer)
         
-        #
-        # main components
-        #
+        # MAIN COMPONENTS
         
         # backbone
         layers = [
@@ -74,17 +76,17 @@ class Encoder(Module):
             Sequential(
                 Conv2d(
                     img_channels, 
-                    down_channels[0],
-                    kernel_size=1,
+                    down_channels[0]//2,
+                    kernel_size=3,
+                    padding=(1, 1),
                     **factory_kwargs
                 ),
-                get_activation(activation),
+                get_activation(activation, **self.factory_kwargs),
             )
         ]
-        
         # add stages
         down_channels_per_stage = list(down_channels) 
-        down_channels_per_stage = [down_channels[0]] + down_channels_per_stage
+        down_channels_per_stage = [down_channels[0]//2] + down_channels_per_stage
         for stage_i in range(0, num_stage):
             layers.append(
                 DownBlock(
@@ -94,81 +96,18 @@ class Encoder(Module):
                     **factory_kwargs
                 )
             )
-        
         self.layers = Sequential(*layers)
         # self._reset_parameters()
     
-    
     def _reset_parameters(self):
         self.initializer(self.layers[0][0].weight)
-        
         if self.layers[0][0].bias is not None:
             ones_(self.layers[0][0].bias)
-
 
     def forward(self, input: Tensor) -> Tensor:
         return self.layers(input)
     
 
-class VAEEncoder(Encoder):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.last_dim = self.down_channels[-1] 
-        H, W = kwargs["latent_shape"]
-        self.lattent_dim = H*W * self.last_dim
-        
-        # append the µ and log(σ2) layers
-        self.mean = Sequential(
-            Linear(
-                in_features=self.last_dim,
-                out_features=self.lattent_dim,
-                **self.factory_kwargs
-            ),
-            get_activation(self.activation),
-            Linear(
-                in_features=self.lattent_dim,
-                out_features=self.lattent_dim,
-                **self.factory_kwargs
-            ),
-        )
-        self.log_var = Sequential(
-            Linear(
-                in_features=self.last_dim,
-                out_features=self.lattent_dim,
-                **self.factory_kwargs
-            ),
-            get_activation(self.activation),
-            Linear(
-                in_features=self.lattent_dim,
-                out_features=self.lattent_dim,
-                **self.factory_kwargs
-            ),
-        )
-        self._reset_parameters()
-    
-    
-    def _reset_parameters(self):
-        super()._reset_parameters()
-        self.initializer(self.mean[0].weight)
-        self.initializer(self.log_var[0].weight)
-        self.initializer(self.mean[2].weight)
-        self.initializer(self.log_var[2].weight)
-    
-        ones_(self.mean[0].bias)
-        ones_(self.log_var[0].bias)
-        ones_(self.mean[2].bias)
-        ones_(self.log_var[2].bias)
-    
-
-    def forward(self, input: Tensor) -> Tuple[Tensor, Tensor]:
-        Z = self.layers(input)
-        N, C = Z.shape[:2]
-        Z = avg_pool2d(Z, Z.shape[2:]).view(N, C) # (N, C)
-        mean = self.mean(Z)
-        log_var = self.log_var(Z)
-        return mean, log_var
-    
-   
 class Decoder(Module):
     def __init__(
         self,
@@ -199,37 +138,49 @@ class Decoder(Module):
                 Defaults to "he_uniform".
         """
         super().__init__()
-        
         factory_kwargs = {"device": device, "dtype": dtype}
         num_stage = len(up_channels)
+        
+        self.latent_channels = latent_channels
+        self.pre_latent_dim = PRE_H * PRE_W * self.latent_channels
+        self.latent_shape = kwargs["latent_shape"]
+        self.pre_latent_shape = (PRE_H, PRE_W)
+        self.factory_kwargs = factory_kwargs
+        self.img_channels = img_channels
+        self.latent_channels = latent_channels
+        self.initializer = _get_initializer(initializer)
+        
         invert_residual_kwargs = {
             "expand_factor": expand_factor, 
             "num_groups_norm": num_groups_norm, 
             "activation": activation,
             "initializer": initializer,
         }
-        self.img_channels = img_channels
-        self.latent_channels = latent_channels
-        self.initializer = _get_initializer(initializer)
         
-        #
-        # main components
-        #
+        # MAIN COMPONENTS
         
-        # add stages
         layers = []
-        
+        # latent conv to restore the topological
         # stem block - stride = 0
         projection = [
+            ConvTranspose2d(
+                in_channels=latent_channels,
+                out_channels=latent_channels,
+                kernel_size=2,
+                stride=2,
+                padding=(0, 0),
+                **self.factory_kwargs
+            ),
+            get_activation(activation, **self.factory_kwargs),
             Conv2d(latent_channels, up_channels[0], 1, **factory_kwargs),
             GroupNorm(num_groups_norm, up_channels[0], **factory_kwargs),
-            get_activation(activation)
+            get_activation(activation, **self.factory_kwargs)
         ]
         layers.extend(projection)
         
         # main layers
         up_channels_per_stage = list(up_channels) 
-        up_channels_per_stage = up_channels_per_stage + [up_channels_per_stage[-1]]
+        up_channels_per_stage = up_channels_per_stage + [up_channels_per_stage[-1]//2]
         for stage_i in range(0, num_stage):
             layers.append(
                 UpBlock(
@@ -239,20 +190,17 @@ class Decoder(Module):
                     **factory_kwargs
                 )
             )
-        
         # out layer
         layers.append(
             Sequential(
-                # depthwise
                 Conv2d(
                     in_channels=up_channels[-1], 
                     out_channels=up_channels[-1], 
-                    kernel_size=1, 
-                    groups=up_channels[-1],
+                    kernel_size=3, 
+                    padding=(1, 1),
                     **factory_kwargs
                 ),
-                get_activation(activation),
-                
+                get_activation(activation, **self.factory_kwargs),
                 # pointwise
                 Conv2d(
                     up_channels[-1], 
@@ -262,53 +210,22 @@ class Decoder(Module):
                 ),
             )
         )
-        
         self.layers = Sequential(*layers)
         self._reset_parameters()
-        
     
     def _reset_parameters(self):
         self.initializer(self.layers[0].weight)   
+        self.initializer(self.layers[2].weight)   
         self.initializer(self.layers[-1][0].weight)
         self.initializer(self.layers[-1][2].weight)        
-        
         if self.layers[0].bias is not None:
             ones_(self.layers[0].bias)
+            ones_(self.layers[2].bias)
             ones_(self.layers[-1][0].bias)
             ones_(self.layers[-1][2].bias)     
-    
     
     def forward(
         self, 
         input: Tensor,
     ) -> Tensor:
         return self.layers(input)
-    
-    
-class VAEDecoder(Decoder):
-    def __init__(
-        self, 
-        std_dec: float = 1.,
-        *args, 
-        **kwargs
-    ):
-        super().__init__(*args, **kwargs)
-        self.std_dec = std_dec
-        self.latent_shape = kwargs["latent_shape"]
-    
-    
-    def forward(self, input: Tensor) -> Tensor:
-        """
-        Forward method of VAE Decoder
-
-        Args:
-            input (Tensor): Latent vector
-
-        Shape:
-            input: (N, d)
-        
-        Returns:
-            Tensor: Reconstructed image
-        """
-        Z = input.view(input.size(0), self.latent_channels, *self.latent_shape) # (N, C, H, W)
-        return self.layers(Z)
