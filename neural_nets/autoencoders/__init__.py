@@ -1,5 +1,3 @@
-__all__ = ["ae", "constituent_blocks", "trainer"]
+__all__ = ["base_ae", "vae", "constituent_blocks", "trainer"]
 
-from . import  ae
-from . import constituent_blocks
-from . import trainer
+from . import base_ae, vae, constituent_blocks, trainer
