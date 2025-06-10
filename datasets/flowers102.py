@@ -29,13 +29,12 @@ class Flowers102AE(BaseFlowers102):
         image_file = self._image_files[idx]
         
         image = PIL.Image.open(image_file).convert("RGB")
-        image: Tensor = transforms.ToTensor()(image) # [0, 1] range
-        
-        image = tv_tensors.Image(image)
-        
         if self.transform:
             image = self.transform(image)
             
+        image: Tensor = transforms.ToTensor()(image) # [0, 1] range
+        
+        image = tv_tensors.Image(image)
         label = image.clone()
         
         # scale input
