@@ -1,6 +1,7 @@
 data*/
 / Do not ignore the 'datasets' folder
 !datasets/
+weights/
 env/
 docs/
 __pycache__/
