@@ -9,6 +9,7 @@ from torch.nn import (
     ReLU6, 
     SELU,
     GELU,
+    SiLU,
 )
 import torch.nn.functional as F
 
@@ -47,7 +48,6 @@ class HardSwish(Module):
         """
         super().__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
-        
         self.beta = Parameter(torch.ones((), **factory_kwargs))
         
     def forward(self, input):
@@ -64,12 +64,17 @@ ACTIVATIONS = {
     "relu6": ReLU6,
     "selu": SELU,
     "gelu": GELU,
+    "SiLU": SiLU,
 }
 
 
-def get_activation(name: str):
+def get_activation(
+    name: str,
+    *args,
+    **kwargs
+):
     try:
-        return ACTIVATIONS[name]()
+        return ACTIVATIONS[name](*args, **kwargs)
     except KeyError:
         raise KeyError(
             f"Activation must be one of these {list(ACTIVATIONS.keys)}, got {name} instead"
