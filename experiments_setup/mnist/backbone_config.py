@@ -2,6 +2,7 @@ ENCODER_CONFIGS = {
     "img_channels": 3,
     "down_channels": (16, 32, 64),
     "expand_factor": 2,
+    "drop_p": 0.35,
     "num_groups_norm": 4,
     "activation": "hardswish",
     "dtype": None,
@@ -12,9 +13,10 @@ DECODER_CONFIGS = {
     "latent_channels": 64,
     "up_channels": (32, 24, 16),
     "expand_factor": 2,
+    "drop_p": 0.35,
     "num_groups_norm": 4,
     "activation": "hardswish",
-    "latent_shape": (4, 4),
+    "latent_shape": (8, 8),
     "dtype": None,
 }
 
