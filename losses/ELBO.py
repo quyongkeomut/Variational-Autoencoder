@@ -11,12 +11,12 @@ from torch import (
 )
 
 from torch.nn import (Module)
-from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.nn.functional import mse_loss
 
 class ELBOLoss(Module):
     def __init__(
         self, 
-        M: int = 16,
+        M: int = 1,
         beta: float = 1.0,
         epsilon: float = 1e-5,
         *args, 
@@ -57,7 +57,6 @@ class ELBOLoss(Module):
         Returns:
             Tensor: Prior matching component of ELBO as a scalar
         """
-        N, dim = mean.shape
         # return 1./(2. * N) * (
         #     var.sum(-1) # (N,)
         #     - dim  # (d,)
@@ -66,12 +65,12 @@ class ELBOLoss(Module):
         # ).sum() / dim # for a proper ratio with the Reconstruction Loss
         
         # ----> 
-        return 1./(2. * N * dim) * ( # for a proper ratio with the Reconstruction Loss
+        return 0.5 * ( # for a proper ratio with the Reconstruction Loss
             exp(log_var) # (N, d)
             - 1  # ()
             + mean.square() # (N, d)
             - log_var # (N, d)
-        ).sum() 
+        ).mean(dim=(0, 1)) 
     
     
     def _reconstruction(
@@ -99,19 +98,20 @@ class ELBOLoss(Module):
         """
         # get the statistics from the Encoder
         mean, log_var = stats # (N, d)
+        d = log_var.size(-1)
         mean, log_var = mean.unsqueeze(0), log_var.unsqueeze(0) # (1, N, d), (1, N, d) 
                 
         N, C, H, W = target.shape # C = 3
         shape_MC = (self.M, N, C, H, W)        
-        target = target.unsqueeze(0).expand(shape_MC).reshape(self.M*N, C, H, W) # (M*N, C, H, W)
+        target = target.unsqueeze(0).expand(shape_MC).reshape(-1, C, H, W) # (M*N, C, H, W)
         
         # create Monte Carlo estimation of latent vectors
         noise_MC = randn_like(mean.expand(self.M, -1, -1)) # (M, N, d)
-        latent_MC = mean + exp(log_var / 2)*noise_MC # (M, N, d)
-        latent_MC = latent_MC.view(self.M*N, latent_MC.size(-1)) # (M*N, d)
+        latent_MC = mean + exp(log_var / 2.)*noise_MC # (M, N, d)
+        latent_MC = latent_MC.view(-1, d) # (M*N, d)
         
         output_MC: Tensor = decoder(latent_MC) # (M*N, C, H, W)        
-        return 1./(2. * decoder.std_dec**2) * binary_cross_entropy_with_logits(output_MC, target)
+        return 0.5 * mse_loss(output_MC, target)
     
     
     def forward(
