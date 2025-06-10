@@ -52,7 +52,7 @@ class SeparableInvertResidual(Module):
             self.is_residual = True
         else:
             self.is_residual = False
-        
+
         # pointwise
         expansion = [
             Dropout(drop_p),
@@ -67,7 +67,7 @@ class SeparableInvertResidual(Module):
                 num_channels=expand_channels,
                 **factory_kwargs
             ),
-            get_activation(activation),
+            get_activation(activation, **factory_kwargs),
         ]
         self.expansion = Sequential(*expansion)
         
@@ -88,7 +88,7 @@ class SeparableInvertResidual(Module):
                 num_channels=expand_channels,
                 **factory_kwargs
             ),
-            get_activation(activation),
+            get_activation(activation, **factory_kwargs),
         ]
         self.depthwise = Sequential(*depthwise)
         
@@ -113,14 +113,14 @@ class SeparableInvertResidual(Module):
     
     
     def _reset_parameters(self) -> None:
-        self.initializer(self.expansion[0].weight)
-        self.initializer(self.depthwise[0].weight)
-        self.initializer(self.projection[0].weight)
+        self.initializer(self.expansion[1].weight)
+        self.initializer(self.depthwise[1].weight)
+        self.initializer(self.projection[1].weight)
         
-        if self.expansion[0].bias is not None:
-            ones_(self.expansion[0].bias)
-            ones_(self.depthwise[0].bias)
-            ones_(self.projection[0].bias)
+        if self.expansion[1].bias is not None:
+            ones_(self.expansion[1].bias)
+            ones_(self.depthwise[1].bias)
+            ones_(self.projection[1].bias)
         
         
     def forward(self, input):
