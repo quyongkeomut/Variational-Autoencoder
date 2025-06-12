@@ -17,5 +17,7 @@ __pycache__/
 *.json
 *.h5
 *.lnk
-_test*
+*_test*
+*.pt
+*.pth
 datasets/gen*
