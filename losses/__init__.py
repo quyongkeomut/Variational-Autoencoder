@@ -1,3 +1,3 @@
-__all__ = ["ELBO"]
+__all__ = ["ELBO", "VQ"]
 
-from . import ELBO
+from . import ELBO, VQ
