@@ -19,7 +19,7 @@ from neural_nets.autoencoders.constituent_blocks import DownBlock, UpBlock
 from utils.initializers import _get_initializer, ones_
 
 
-PRE_H, PRE_W = 2, 2
+LATENT_H, LATENT_W = 1, 1
 
 
 class Encoder(Module):
@@ -27,7 +27,9 @@ class Encoder(Module):
         self,
         img_channels: int,
         down_channels: Sequence[int],
+        latent_dim: int,
         expand_factor: int,
+        drop_p: float = 0.3,
         num_groups_norm: int = 4,
         activation: str = "hardswish",
         device=None,
@@ -41,7 +43,8 @@ class Encoder(Module):
 
         Args:
             img_channels (int): Number of channels of input image. 
-            down_channels (Sequence[int]): Sequence of channels along stages of Encoder
+            down_channels (Sequence[int]): Sequence of channels along stages of Encoder.
+            latent_dim (int): Dimension of latent representation.
             expand_factor (int, optional): Coeficient which is used to expand number of channels.
             num_groups_norm (int, optional): Number of group for GN layer. Defaults to 4.
             activation (str, optional): Type of nonlinear activation function. 
@@ -53,51 +56,52 @@ class Encoder(Module):
         
         factory_kwargs = {"device": device, "dtype": dtype}
         self.last_dim = down_channels[-1]
-        self.pre_latent_dim = PRE_H * PRE_W * self.last_dim
-        self.pre_latent_shape = (PRE_H, PRE_W)
-        
+        self.latent_dim = latent_dim
+        self.down_channels = down_channels
+        self.initializer = _get_initializer(initializer)
         self.activation = activation
         self.factory_kwargs = factory_kwargs
-        self.down_channels = down_channels
-        num_stage = len(down_channels)
-        invert_residual_kwargs = {
+        self.invert_residual_kwargs = {
             "expand_factor": expand_factor, 
             "num_groups_norm": num_groups_norm, 
+            "drop_p": drop_p,
             "activation": activation,
-            "initializer": initializer
+            "initializer": initializer,
         }
-        self.initializer = _get_initializer(initializer)
-        
         # MAIN COMPONENTS
-        
+        self._set_backbone(img_channels, activation)
+        Encoder._reset_parameters(self)
+
+    def _set_backbone(
+        self,
+        img_channels,
+        activation
+    ):
         # backbone
         layers = [
             # stem - stride = 0
             Sequential(
                 Conv2d(
                     img_channels, 
-                    down_channels[0]//2,
+                    self.down_channels[0]//2,
                     kernel_size=3,
                     padding=(1, 1),
-                    **factory_kwargs
+                    **self.factory_kwargs
                 ),
                 get_activation(activation, **self.factory_kwargs),
             )
         ]
         # add stages
-        down_channels_per_stage = list(down_channels) 
-        down_channels_per_stage = [down_channels[0]//2] + down_channels_per_stage
-        for stage_i in range(0, num_stage):
+        for idx, stage_i in enumerate(self.down_channels):
             layers.append(
                 DownBlock(
-                    in_channels=down_channels_per_stage[stage_i],
-                    out_channels=down_channels_per_stage[stage_i + 1],
-                    **invert_residual_kwargs,
-                    **factory_kwargs
+                    in_channels=stage_i//2 if idx == 0 else self.down_channels[idx-1],
+                    out_channels=stage_i,
+                    **self.invert_residual_kwargs,
+                    **self.factory_kwargs
                 )
             )
         self.layers = Sequential(*layers)
-        # self._reset_parameters()
     
     def _reset_parameters(self):
         self.initializer(self.layers[0][0].weight)
@@ -112,9 +116,10 @@ class Decoder(Module):
     def __init__(
         self,
         img_channels: int,
-        latent_channels: int,
+        latent_dim: int,
         up_channels: Sequence[int],
         expand_factor: int,
+        drop_p: float = 0.3,
         num_groups_norm: int = 4,
         activation: str = "hardswish",
         initializer: str | Callable[[Tensor], Tensor] = "he_uniform",
@@ -128,9 +133,10 @@ class Decoder(Module):
 
         Args:
             img_channels (int): Number of channels of input image
-            latent_channels (int): _description_
+            latent_dim (int): Dimension of latent representation.
             up_channels (Sequence[int]): Sequence of channels along stages of Decoder
             expand_factor (int, optional): Coeficient which is used to expand number of channels.
+            drop_p (float, optional): Dropout rate. Defaults to 0.3.
             num_groups_norm (int, optional): Number of group for GN layer. Defaults to 4.
             activation (str, optional): Type of nonlinear activation function. 
                 Defaults to "hardswish".
@@ -139,79 +145,84 @@ class Decoder(Module):
         """
         super().__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
-        num_stage = len(up_channels)
         
-        self.latent_channels = latent_channels
-        self.pre_latent_dim = PRE_H * PRE_W * self.latent_channels
-        self.latent_shape = kwargs["latent_shape"]
-        self.pre_latent_shape = (PRE_H, PRE_W)
+        self.latent_dim = latent_dim
+        self.up_channels = up_channels
+        self.latent_shape = (LATENT_H, LATENT_W)
         self.factory_kwargs = factory_kwargs
         self.img_channels = img_channels
-        self.latent_channels = latent_channels
         self.initializer = _get_initializer(initializer)
-        
-        invert_residual_kwargs = {
+        self.activation = activation
+        self.invert_residual_kwargs = {
             "expand_factor": expand_factor, 
+            "drop_p": drop_p,
             "num_groups_norm": num_groups_norm, 
             "activation": activation,
             "initializer": initializer,
         }
         
         # MAIN COMPONENTS
+        self._set_backbone(activation, img_channels)
+        Decoder._reset_parameters(self)
         
+    def _set_backbone(
+        self,
+        activation,
+        img_channels
+    ):
         layers = []
-        # latent conv to restore the topological
-        # stem block - stride = 0
         projection = [
             ConvTranspose2d(
-                in_channels=latent_channels,
-                out_channels=latent_channels,
+                in_channels=self.latent_dim,
+                out_channels=self.latent_dim,
                 kernel_size=2,
                 stride=2,
                 padding=(0, 0),
                 **self.factory_kwargs
             ),
-            get_activation(activation, **self.factory_kwargs),
-            Conv2d(latent_channels, up_channels[0], 1, **factory_kwargs),
-            GroupNorm(num_groups_norm, up_channels[0], **factory_kwargs),
-            get_activation(activation, **self.factory_kwargs)
+            get_activation(self.activation, **self.factory_kwargs),
+            Conv2d(
+                in_channels=self.latent_dim,
+                out_channels=self.latent_dim,
+                kernel_size=1,
+                padding=(0, 0),
+                **self.factory_kwargs
+            ),
+            get_activation(self.activation, **self.factory_kwargs),
         ]
         layers.extend(projection)
         
         # main layers
-        up_channels_per_stage = list(up_channels) 
-        up_channels_per_stage = up_channels_per_stage + [up_channels_per_stage[-1]//2]
-        for stage_i in range(0, num_stage):
+        for idx, stage_i in enumerate(self.up_channels):
             layers.append(
                 UpBlock(
-                    up_channels[stage_i], 
-                    up_channels_per_stage[stage_i + 1], 
-                    **invert_residual_kwargs, 
-                    **factory_kwargs
+                    in_channels=self.latent_dim if idx == 0 else self.up_channels[idx-1], 
+                    out_channels=stage_i, 
+                    **self.invert_residual_kwargs, 
+                    **self.factory_kwargs
                 )
             )
         # out layer
         layers.append(
             Sequential(
                 Conv2d(
-                    in_channels=up_channels[-1], 
-                    out_channels=up_channels[-1], 
+                    in_channels=self.up_channels[-1], 
+                    out_channels=self.up_channels[-1], 
                     kernel_size=3, 
                     padding=(1, 1),
-                    **factory_kwargs
+                    **self.factory_kwargs
                 ),
                 get_activation(activation, **self.factory_kwargs),
                 # pointwise
                 Conv2d(
-                    up_channels[-1], 
+                    self.up_channels[-1], 
                     img_channels, 
                     kernel_size=1, 
-                    **factory_kwargs
+                    **self.factory_kwargs
                 ),
             )
         )
         self.layers = Sequential(*layers)
-        self._reset_parameters()
     
     def _reset_parameters(self):
         self.initializer(self.layers[0].weight)   
@@ -229,3 +240,13 @@ class Decoder(Module):
         input: Tensor,
     ) -> Tensor:
         return self.layers(input)
+    
+    @torch.no_grad()
+    def sample(
+        self,
+    ):
+        raise NotImplementedError
+        
+    
+    def generate(self):
+        raise NotImplementedError
