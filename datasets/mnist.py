@@ -18,7 +18,7 @@ def load_MNIST(data_transform, train=True):
     )
     
     
-def load_transformed_MNIST(img_size):
+def load_transformed_MNIST(img_size, *args, **kwargs):
     img_size = _pair(img_size)
     data_transforms = [
         transforms.Resize(img_size),
