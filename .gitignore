@@ -20,4 +20,5 @@ __pycache__/
 *_test*
 *.pt
 *.pth
+*.zip
 datasets/gen*
