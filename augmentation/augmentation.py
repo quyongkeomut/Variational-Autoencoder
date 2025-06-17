@@ -6,10 +6,6 @@ from torch.nn.modules.utils import _pair
 from torchvision.transforms import v2
 
 
-_VALID_NORM = v2.Compose([
-    v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-
 def _WITH_MASK_AUG(img_size: int | Tuple[int, int]):
     img_size = _pair(img_size)
     transform = v2.Compose([
