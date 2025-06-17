@@ -18,12 +18,12 @@ def load_fashionMNIST(data_transform, train: bool = True):
     )
     
 
-def load_transformed_fashionMNIST(img_size):
+def load_transformed_fashionMNIST(img_size, *args, **kwargs):
     img_size = _pair(img_size)
     data_transforms = [
         transforms.Resize(img_size),
-        transforms.ToTensor(),  # Scales data into [0,1]
         transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),  # Scales data into [0,1]
         transforms.Lambda(duplicate_channels),
     ]
 
