@@ -1,4 +1,0 @@
-OUT_CHANNELS = 10
-OPTIMIZER_NAME: str = "adamw"
-OPTIM_ARGS = {
-}
