@@ -9,7 +9,7 @@ from torch.nn import (
 from torch.nn.functional import avg_pool2d
 
 from neural_nets.activations import get_activation
-from neural_nets.autoencoders.base_ae import Encoder, Decoder, PRE_H, PRE_W
+from neural_nets.autoencoders.base_ae import Encoder, Decoder
 
 from utils.initializers import ones_
 from utils.other_utils import REVERSE_TRANSFORMS
@@ -18,10 +18,9 @@ from utils.other_utils import REVERSE_TRANSFORMS
 class VAEEncoder(Encoder):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.last_dim = self.down_channels[-1] 
         
         # append the µ and log(σ2) layers
-        post_last_dim = 2*self.last_dim
+        post_last_dim = self.invert_residual_kwargs["expand_factor"]*self.last_dim
         self.mean = Sequential(
             Linear(
                 in_features=self.last_dim,
@@ -32,7 +31,7 @@ class VAEEncoder(Encoder):
             
             Linear(
                 in_features=post_last_dim,
-                out_features=self.pre_latent_dim,
+                out_features=self.latent_dim,
                 **self.factory_kwargs
             ),
         )
@@ -47,7 +46,7 @@ class VAEEncoder(Encoder):
             
             Linear(
                 in_features=post_last_dim,
-                out_features=self.pre_latent_dim,
+                out_features=self.latent_dim,
                 **self.factory_kwargs
             ),
         )
@@ -79,13 +78,10 @@ class VAEEncoder(Encoder):
 class VAEDecoder(Decoder):
     def __init__(
         self, 
-        std_dec: float = 1.0,
         *args, 
         **kwargs
     ):
         super().__init__(*args, **kwargs)
-        self.std_dec = std_dec
-
     
     def forward(self, input: Tensor) -> Tensor:
         """
@@ -100,21 +96,25 @@ class VAEDecoder(Decoder):
         Returns:
             Tensor: Reconstructed image
         """
-        Z = input.view(-1, self.latent_channels, PRE_H, PRE_W) # (N, C, H, W)
+        Z = input # (N, d)
+        Z = Z.view(-1, self.latent_dim, *self.latent_shape) # (N, C, H, W)
         return self.layers(Z)
     
+    @torch.no_grad()
     def sample(
         self,
         num_samples: int,
     ):
+        
         """
         Samples from the latent space and return the synthetic image
 
         Args:
             num_samples (int): Number of samples
         """
-        Z = torch.randn(num_samples, self.latent_channels, PRE_H, PRE_W, **self.factory_kwargs)
-        return self.layers(Z).detach()
+        Z = torch.randn(num_samples, self.latent_dim, *self.latent_shape, **self.factory_kwargs) # (N, C, H, W)
+        outputs = self.layers(Z).detach().cpu()
+        return [REVERSE_TRANSFORMS(output) for output in outputs]
     
     def generate(self):
-        return REVERSE_TRANSFORMS(self.sample(1)[0].cpu())
+        return self.sample(1)[0]
