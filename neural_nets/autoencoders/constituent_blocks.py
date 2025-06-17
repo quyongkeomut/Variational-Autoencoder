@@ -39,6 +39,7 @@ class DownBlock(Module):
             out_channels (int): output channels
             expand_factor (int, optional): Expand factor used in expansion conv layer
                 of inverted residual block . Defaults to 3.
+            drop_p (float, optional): Dropout rate. Defaults to 0.3.
             num_groups_norm (int, optional): Number of group to be normalized by group norm. 
                 Defaults to 4.
             activation (str, optional): Activation function. Defaults to "hardswish".
@@ -63,11 +64,21 @@ class DownBlock(Module):
                 in_channels, 
                 out_channels,
                 kernel_size=3,
+                stride=2,
+                padding=(1, 1),
+                **factory_kwargs
+            ),
+            get_activation(activation),
+            Conv2d(
+                out_channels, 
+                out_channels,
+                kernel_size=3,
                 padding=(1, 1),
                 **factory_kwargs
             ),
             GroupNorm(num_groups_norm, out_channels, **factory_kwargs),
             get_activation(activation),
+            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
             SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
         ]
         self.layers = Sequential(*layers)
@@ -75,8 +86,10 @@ class DownBlock(Module):
         
     def _reset_parameters(self):
         self.initializer(self.layers[0].weight)
+        self.initializer(self.layers[2].weight)
         if self.layers[0].bias is not None:
             ones_(self.layers[0].bias)
+            ones_(self.layers[2].bias)
 
     def forward(
         self, 
@@ -116,6 +129,7 @@ class UpBlock(Module):
             out_channels (int): output channels
             expand_factor (int, optional): Expand factor used in expansion conv layer
                 of inverted residual block . Defaults to 3.
+            drop_p (float, optional): Dropout rate. Defaults to 0.3.
             num_groups_norm (int, optional): Number of group to be normalized by group norm. 
                 Defaults to 4.
             activation (str, optional): Activation function. Defaults to "hardswish".
@@ -140,6 +154,7 @@ class UpBlock(Module):
                 out_channels=in_channels,
                 kernel_size=2,
                 stride=2,
+                padding=(0, 0),
                 **factory_kwargs
             ),
             get_activation(activation),
@@ -152,6 +167,7 @@ class UpBlock(Module):
             ),
             GroupNorm(num_groups_norm, out_channels, **factory_kwargs),
             get_activation(activation),
+            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
             SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
         ]
         self.layers = Sequential(*layers)
