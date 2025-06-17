@@ -1,0 +1,35 @@
+NAME: "VAE"
+
+
+IMG_CHANNELS: 3
+
+
+LATENT_DIM: 384
+
+
+ENCODER_CONFIGS:
+  down_channels: [32, 64, 128, 256]
+  expand_factor: 2
+  drop_p: 0.4
+  num_groups_norm: 8
+  activation: "swish"
+  dtype: null
+
+
+DECODER_CONFIGS: 
+  up_channels: [256, 128, 64, 32, 32]
+  expand_factor: 2
+  drop_p: 0.3
+  num_groups_norm: 8
+  activation: "swish"
+  dtype: null
+
+
+OPTIMIZER_NAME: "adamw"
+
+
+OPTIM_KWARGS: {}
+
+
+LOGGING_KWARGS:
+  save_dir: "/kaggle/working/weights/VAE"
