@@ -1,4 +1,5 @@
 from typing import List
+from PIL import Image
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 from IPython.display import HTML
@@ -9,11 +10,30 @@ from torch.nn.modules.utils import _pair
 import torchvision.transforms as transforms
 
 
-REVERSE_TRANSFORMS = transforms.Compose([
-    transforms.Lambda(lambda t: torch.minimum(torch.tensor([1], device=t.device), t)),
-    transforms.Lambda(lambda t: torch.maximum(torch.tensor([0], device=t.device), t)),
-    transforms.ToPILImage(),
-])
+def to_image(
+    tensor: Tensor, 
+    to_pil: bool = True
+) -> Tensor | Image.Image:
+    """
+    Transform a tensor into image
+
+    Args:
+        tensor (Tensor): Input tensor.
+        to_pil (bool, optional): Whether transform it to PIL Image. Defaults to True.
+
+    Shape:
+        tensor: (C, H, W)
+    
+    Returns:
+        Image: Output image
+    """
+    ones = torch.ones_like(tensor)
+    tensor = torch.min(torch.stack([tensor, ones]), 0)[0]
+    zeros = torch.zeros_like(tensor)
+    tensor = torch.max(torch.stack([tensor, zeros]), 0)[0]
+    if not to_pil:
+        return tensor
+    return transforms.functional.to_pil_image(tensor)
 
 
 def show_animation(
@@ -36,9 +56,10 @@ def save_animation(
     xs, 
     save_path, 
     interval=300, 
-    repeat_delay=5000
+    repeat_delay=5000,
+    dpi: int = 200
 ):
-    fig = plt.figure()
+    fig = plt.figure(dpi=dpi)
     plt.axis('off')
     imgs = []
     for x_t in xs:
@@ -52,17 +73,7 @@ def show_tensor_image(
     image: Tensor,
 ):
     plt.imshow(image)
-    
 
-def to_image(tensor, to_pil=True):
-    tensor = (tensor + 1) / 2
-    ones = torch.ones_like(tensor)
-    tensor = torch.min(torch.stack([tensor, ones]), 0)[0]
-    zeros = torch.zeros_like(tensor)
-    tensor = torch.max(torch.stack([tensor, zeros]), 0)[0]
-    if not to_pil:
-        return tensor
-    return transforms.functional.to_pil_image(tensor)
 
 def plot_generated_images(
     results,
