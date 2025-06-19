@@ -6,13 +6,13 @@ from torch.nn import (
     Sequential,
     Linear,
 )
-from torch.nn.functional import avg_pool2d
+from torch.nn.functional import sigmoid
 
 from neural_nets.activations import get_activation
 from neural_nets.autoencoders.base_ae import Encoder, Decoder
 
-from utils.initializers import ones_
-from utils.other_utils import REVERSE_TRANSFORMS
+from utils.initializers import ones_, zeros_
+from utils.other_utils import to_image
 
 
 class VAEEncoder(Encoder):
@@ -28,7 +28,6 @@ class VAEEncoder(Encoder):
                 **self.factory_kwargs
             ),
             get_activation(self.activation, **self.factory_kwargs),
-            
             Linear(
                 in_features=post_last_dim,
                 out_features=self.latent_dim,
@@ -43,14 +42,12 @@ class VAEEncoder(Encoder):
                 **self.factory_kwargs
             ),
             get_activation(self.activation, **self.factory_kwargs),
-            
             Linear(
                 in_features=post_last_dim,
                 out_features=self.latent_dim,
                 **self.factory_kwargs
             ),
         )
-        
         self._reset_parameters()
     
     
@@ -62,15 +59,14 @@ class VAEEncoder(Encoder):
         self.initializer(self.log_var[2].weight)
     
         ones_(self.mean[0].bias)
-        ones_(self.mean[2].bias)
+        zeros_(self.mean[2].bias)
         ones_(self.log_var[0].bias)
-        ones_(self.log_var[2].bias)
+        zeros_(self.log_var[2].bias)
     
 
     def forward(self, input: Tensor) -> Tuple[Tensor, Tensor]:
-        Z = self.layers(input)
-        N, C = Z.shape[:2]
-        Z = avg_pool2d(Z, Z.shape[2:]).view(N, C) # (N, C)
+        Z: Tensor = self.layers(input) # (N, C, H, W)
+        Z = Z.mean((-1, -2)) # (N, C), global avg pool
         mean, log_var = self.mean(Z), self.log_var(Z)
         return mean, log_var
     
@@ -78,10 +74,13 @@ class VAEEncoder(Encoder):
 class VAEDecoder(Decoder):
     def __init__(
         self, 
+        reconstruction_method: str = "mse",
         *args, 
         **kwargs
     ):
         super().__init__(*args, **kwargs)
+        self.reconstruction_method = reconstruction_method
+        
     
     def forward(self, input: Tensor) -> Tensor:
         """
@@ -100,12 +99,12 @@ class VAEDecoder(Decoder):
         Z = Z.view(-1, self.latent_dim, *self.latent_shape) # (N, C, H, W)
         return self.layers(Z)
     
+    
     @torch.no_grad()
     def sample(
         self,
         num_samples: int,
     ):
-        
         """
         Samples from the latent space and return the synthetic image
 
@@ -114,7 +113,10 @@ class VAEDecoder(Decoder):
         """
         Z = torch.randn(num_samples, self.latent_dim, *self.latent_shape, **self.factory_kwargs) # (N, C, H, W)
         outputs = self.layers(Z).detach().cpu()
-        return [REVERSE_TRANSFORMS(output) for output in outputs]
+        if self.reconstruction_method == "bce":
+            outputs = sigmoid(outputs)
+        return [to_image(output) for output in outputs]
+    
     
     def generate(self):
         return self.sample(1)[0]
