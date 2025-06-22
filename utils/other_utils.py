@@ -3,6 +3,7 @@ from PIL import Image
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 from IPython.display import HTML
+import numpy as np
 
 import torch
 from torch import Tensor
@@ -57,16 +58,29 @@ def save_animation(
     save_path, 
     interval=300, 
     repeat_delay=5000,
-    dpi: int = 200
+    dpi: int = 300
 ):
-    fig = plt.figure(dpi=dpi)
-    plt.axis('off')
+    # Convert the first PIL image to NumPy to get dimensions
+    width, height = xs[0].size  # PIL gives size as (W, H)
+
+    # Set figure size to exactly match the image size
+    fig = plt.figure(figsize=(width / dpi * 3, height / dpi * 3), dpi=dpi)
+
+    # Axes that fill the entire figure (no borders)
+    ax = plt.axes([0, 0, 1, 1])  # left, bottom, width, height in [0,1]
+    ax.set_axis_off()
     imgs = []
     for x_t in xs:
-        im = plt.imshow(x_t, animated=True)
+        arr = np.asarray(x_t)
+        im = ax.imshow(arr, animated=True)
         imgs.append([im])
-    animate = animation.ArtistAnimation(fig, imgs, interval=interval, repeat_delay=repeat_delay)
-    animate.save(save_path)
+    animate = animation.ArtistAnimation(
+        fig, 
+        imgs, 
+        interval=interval, 
+        repeat_delay=repeat_delay
+    )
+    animate.save(save_path, dpi=dpi)
 
 
 def show_tensor_image(
