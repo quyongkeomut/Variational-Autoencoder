@@ -11,12 +11,13 @@ from torch import (
 )
 
 from torch.nn import (Module)
-from torch.nn.functional import mse_loss
+from torch.nn.functional import mse_loss, binary_cross_entropy_with_logits
 
 class ELBOLoss(Module):
     def __init__(
         self, 
-        M: int = 1,
+        prior_weight: float = 1e-4,
+        reconstruction_method: str = "mse",
         beta: float = 1.0,
         epsilon: float = 1e-5,
         *args, 
@@ -26,16 +27,20 @@ class ELBOLoss(Module):
         Implementation of ELBO (Evidence Lower-Bound) and it variant beta-VAE (β-VAE)
         
         Args:
-            M (int, optional): Number of samples for the Monte-Carlo estimation. 
-                Defaults to 16.
+            prior_weight (float, optional): Weight of Prior Matching loss. 
+                Defaults to 1.
             beta (float, optional): Scaling scalar for the Prior matching part of the 
                 total loss function. Defaults to 1.0.
             epsilon (float, optional): Smoothing value. Defaults to 1e-5.
         """
-        super().__init__(*args, **kwargs)
-        self.M = M
-        self.beta = beta
-        self.epsilon = epsilon
+        super().__init__()
+        self.prior_weight = float(prior_weight)
+        assert reconstruction_method in ["mse", "bce"], (
+            f"reconstruction_method must be one of ['mse', 'bce'], got {reconstruction_method} instead."
+        )
+        self.reconstruction_method = reconstruction_method
+        self.beta = float(beta)
+        self.epsilon = float(epsilon)
         
         
     def _prior_matching(
@@ -65,12 +70,12 @@ class ELBOLoss(Module):
         # ).sum() / dim # for a proper ratio with the Reconstruction Loss
         
         # ----> 
-        return 0.5 * ( # for a proper ratio with the Reconstruction Loss
-            exp(log_var) # (N, d)
-            - 1  # ()
-            + mean.square() # (N, d)
-            - log_var # (N, d)
-        ).mean(dim=(0, 1)) 
+        return -0.5 * (
+            1
+            + log_var # (N, d)
+            - log_var.exp() # (N, d)
+            - (mean ** 2) # (N, d)
+        ).sum(-1).mean(0) 
     
     
     def _reconstruction(
@@ -80,8 +85,7 @@ class ELBOLoss(Module):
         target: Tensor
     ) -> Tensor:
         """
-        Calculate the Reconstruction part of ELBO. This part of ELBO loss will use Binary 
-        Entropy Loss, instead of L2 Norm
+        Calculate the Reconstruction part of ELBO.
 
         Args:
             decoder (Any): The Decoder
@@ -98,27 +102,20 @@ class ELBOLoss(Module):
         """
         # get the statistics from the Encoder
         mean, log_var = stats # (N, d)
-        d = log_var.size(-1)
-        mean, log_var = mean.unsqueeze(0), log_var.unsqueeze(0) # (1, N, d), (1, N, d) 
-                
-        N, C, H, W = target.shape # C = 3
-        shape_MC = (self.M, N, C, H, W)        
-        target = target.unsqueeze(0).expand(shape_MC).reshape(-1, C, H, W) # (M*N, C, H, W)
-        
-        # create Monte Carlo estimation of latent vectors
-        noise_MC = randn_like(mean.expand(self.M, -1, -1)) # (M, N, d)
-        latent_MC = mean + exp(log_var / 2.)*noise_MC # (M, N, d)
-        latent_MC = latent_MC.view(-1, d) # (M*N, d)
-        
-        output_MC: Tensor = decoder(latent_MC) # (M*N, C, H, W)        
-        return 0.5 * mse_loss(output_MC, target)
+        latent = self.reparameterize(mean, log_var) # (N, d)
+        output: Tensor = decoder(latent) # (N, C, H, W)       
+        if self.reconstruction_method == "bce": 
+            return binary_cross_entropy_with_logits(output, target)
+        elif self.reconstruction_method == "mse":
+            return mse_loss(output, target)
     
     
     def forward(
         self, 
         decoder: Any,
-        stats: Tensor,
+        stats: Tuple[Tensor],
         X_input: Tensor,
+        
     ) -> Tensor:
         """
         ELBO Loss Forward method
@@ -131,4 +128,22 @@ class ELBOLoss(Module):
         Returns:
             Tensor: Scalar value of ELBO Loss
         """
-        return self.beta*self._prior_matching(*stats) + self._reconstruction(decoder, stats, X_input)
+        prior_loss = self._prior_matching(*stats)
+        recon_loss = self._reconstruction(decoder, stats, X_input)
+        return {
+            "Loss": self.prior_weight*self.beta*prior_loss + recon_loss, 
+            "Prior Loss": prior_loss, 
+            "Recon Loss": recon_loss,
+            "Mean": stats[0].detach().mean((0, 1)), # estimation of current output mean
+            "Var": stats[1].detach().exp().mean((0, 1)) # estimation of current output mean
+        }
+        
+    
+    def reparameterize(
+        self,
+        mean: Tensor,
+        log_var: Tensor
+    ) -> Tensor:
+        std = exp(0.5 * log_var)
+        noise = randn_like(std)
+        return std * noise + mean
