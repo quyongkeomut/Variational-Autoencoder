@@ -8,6 +8,7 @@ from torchvision import tv_tensors
 from torchvision.datasets import Flowers102 
 import torchvision.transforms as transforms
 from torchvision.transforms.v2 import functional as F
+import matplotlib.pyplot as plt
 
 
 class BaseFlowers102(Flowers102):
@@ -17,11 +18,11 @@ class BaseFlowers102(Flowers102):
         split = "train", 
         transform = None, 
         target_transform = None, 
-        download = True
+        download = True,
+        *args,
+        **kwargs
     ):
         super().__init__(root, split, transform, target_transform, download)
-        self.mean = (0.485, 0.456, 0.406)
-        self.std = (0.229, 0.224, 0.225)
     
     
 class Flowers102AE(BaseFlowers102):
@@ -30,13 +31,7 @@ class Flowers102AE(BaseFlowers102):
         
         image = PIL.Image.open(image_file).convert("RGB")
         if self.transform:
-            image = self.transform(image)
-            
+            image = self.transform(image)    
         image: Tensor = transforms.ToTensor()(image) # [0, 1] range
-        
-        image = tv_tensors.Image(image)
-        label = image.clone()
-        
-        # scale input
-        image = F.normalize(image, mean=self.mean, std=self.std) # normalized    
-        return (image, label)
+        # image = tv_tensors.Image(image)
+        return (image, 0.0)
