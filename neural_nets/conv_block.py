@@ -7,6 +7,7 @@ from torch.nn import (
     Sequential,
     Conv2d,
     GroupNorm,
+    BatchNorm2d,
     Dropout
 )
 
@@ -22,7 +23,6 @@ class SeparableInvertResidual(Module):
         out_channels: int,
         expand_factor: int,
         stride: int = 1,
-        num_groups_norm: int = 4,
         drop_p: float = 0.3,
         activation: str = "swish",
         initializer: str | Callable[[Tensor], Tensor] = "he_uniform",
@@ -39,7 +39,6 @@ class SeparableInvertResidual(Module):
             out_channels (int): Number of channels of output.
             expand_factor (int, optional): Expand factor of the first pointwise conv.
                 Defaults to 3.
-            num_groups_norm (int, optional): Number of group for GN layer. Defaults to 4.
             activation (str, optional): Type of nonlinear activation function.
                 Defaults to "swish".
         """
@@ -60,13 +59,10 @@ class SeparableInvertResidual(Module):
                in_channels=in_channels, 
                out_channels=expand_channels,
                kernel_size=1,
+               bias=False,
                **factory_kwargs
             ),
-            GroupNorm(
-                num_groups=num_groups_norm,
-                num_channels=expand_channels,
-                **factory_kwargs
-            ),
+            BatchNorm2d(expand_channels, **factory_kwargs),
             get_activation(activation, **factory_kwargs),
         ]
         self.expansion = Sequential(*expansion)
@@ -78,16 +74,13 @@ class SeparableInvertResidual(Module):
                 in_channels=expand_channels, 
                 out_channels=expand_channels,
                 kernel_size=3,
+                bias=False,
                 stride=stride,
                 padding=(1, 1),
                 groups=expand_channels,
                 **factory_kwargs
             ),
-            GroupNorm(
-                num_groups=num_groups_norm,
-                num_channels=expand_channels,
-                **factory_kwargs
-            ),
+            BatchNorm2d(expand_channels, **factory_kwargs),
             get_activation(activation, **factory_kwargs),
         ]
         self.depthwise = Sequential(*depthwise)
@@ -99,13 +92,10 @@ class SeparableInvertResidual(Module):
                 in_channels=expand_channels, 
                 out_channels=out_channels,
                 kernel_size=1,
+                bias=False,
                 **factory_kwargs
             ),
-            GroupNorm(
-                num_groups=num_groups_norm,
-                num_channels=out_channels,
-                **factory_kwargs
-            ),
+            BatchNorm2d(out_channels, **factory_kwargs),
         ]
         self.projection = Sequential(*projection)
         

@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 from torch import Tensor
@@ -7,6 +7,7 @@ from torch.nn import (
     Sequential,
     Conv2d,
     GroupNorm,
+    BatchNorm2d,
     ConvTranspose2d,
 )
 
@@ -23,7 +24,6 @@ class DownBlock(Module):
         out_channels: int, 
         expand_factor: int = 3,
         drop_p: float = 0.3,
-        num_groups_norm: int = 4,
         activation: str = "hardswish",
         initializer: str | Callable[[Tensor], Tensor] = "he_uniform",
         device=None,
@@ -40,8 +40,6 @@ class DownBlock(Module):
             expand_factor (int, optional): Expand factor used in expansion conv layer
                 of inverted residual block . Defaults to 3.
             drop_p (float, optional): Dropout rate. Defaults to 0.3.
-            num_groups_norm (int, optional): Number of group to be normalized by group norm. 
-                Defaults to 4.
             activation (str, optional): Activation function. Defaults to "hardswish".
         """
         super().__init__()
@@ -51,7 +49,6 @@ class DownBlock(Module):
             "out_channels": out_channels,
             "expand_factor": expand_factor, 
             "drop_p": drop_p,
-            "num_groups_norm": num_groups_norm, 
             "activation": activation,
             "initializer": initializer
         }
@@ -76,9 +73,8 @@ class DownBlock(Module):
                 padding=(1, 1),
                 **factory_kwargs
             ),
-            GroupNorm(num_groups_norm, out_channels, **factory_kwargs),
+            BatchNorm2d(out_channels, **factory_kwargs),
             get_activation(activation),
-            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
             SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
         ]
         self.layers = Sequential(*layers)
@@ -115,7 +111,6 @@ class UpBlock(Module):
         out_channels: int, 
         expand_factor: int = 3,
         drop_p: float = 0.3,
-        num_groups_norm: int = 4,
         activation: str = "hardswish",
         initializer: str | Callable[[Tensor], Tensor] = "he_uniform",
         device=None,
@@ -130,18 +125,14 @@ class UpBlock(Module):
             expand_factor (int, optional): Expand factor used in expansion conv layer
                 of inverted residual block . Defaults to 3.
             drop_p (float, optional): Dropout rate. Defaults to 0.3.
-            num_groups_norm (int, optional): Number of group to be normalized by group norm. 
-                Defaults to 4.
             activation (str, optional): Activation function. Defaults to "hardswish".
         """
         super().__init__()
-        
         invert_residual_kwargs = {
             "in_channels": out_channels,
             "out_channels": out_channels,
             "expand_factor": expand_factor, 
             "drop_p": drop_p,
-            "num_groups_norm": num_groups_norm, 
             "activation": activation,
             "initializer": initializer
         }
@@ -155,17 +146,20 @@ class UpBlock(Module):
                 kernel_size=2,
                 stride=2,
                 padding=(0, 0),
+                bias=False,
                 **factory_kwargs
             ),
+            BatchNorm2d(in_channels, **factory_kwargs),
             get_activation(activation),
             Conv2d(
                 in_channels, 
                 out_channels,
                 kernel_size=3,
                 padding=(1, 1),
+                bias=False,
                 **factory_kwargs
             ),
-            GroupNorm(num_groups_norm, out_channels, **factory_kwargs),
+            BatchNorm2d(out_channels, **factory_kwargs),
             get_activation(activation),
             SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
             SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
@@ -176,10 +170,11 @@ class UpBlock(Module):
 
     def _reset_parameters(self):
         self.initializer(self.layers[0].weight)
-        self.initializer(self.layers[2].weight)
+        self.initializer(self.layers[3].weight)
         if self.layers[0].bias is not None:
             ones_(self.layers[0].bias)
-            ones_(self.layers[2].bias)
+            ones_(self.layers[3].bias)
+
 
     def forward(
         self, 

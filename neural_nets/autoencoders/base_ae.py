@@ -1,6 +1,7 @@
 from typing import (
     Sequence,
-    Callable
+    Callable,
+    Optional
 )
     
 import torch
@@ -10,13 +11,14 @@ from torch.nn import (
     Sequential,
     Conv2d,
     GroupNorm,
+    BatchNorm2d,
     ConvTranspose2d
 )
 
 from neural_nets.activations import get_activation
 from neural_nets.autoencoders.constituent_blocks import DownBlock, UpBlock
 
-from utils.initializers import _get_initializer, ones_
+from utils.initializers import _get_initializer, ones_, zeros_
 
 
 LATENT_H, LATENT_W = 1, 1
@@ -30,7 +32,6 @@ class Encoder(Module):
         latent_dim: int,
         expand_factor: int,
         drop_p: float = 0.3,
-        num_groups_norm: int = 4,
         activation: str = "hardswish",
         device=None,
         dtype=None,
@@ -46,7 +47,6 @@ class Encoder(Module):
             down_channels (Sequence[int]): Sequence of channels along stages of Encoder.
             latent_dim (int): Dimension of latent representation.
             expand_factor (int, optional): Coeficient which is used to expand number of channels.
-            num_groups_norm (int, optional): Number of group for GN layer. Defaults to 4.
             activation (str, optional): Type of nonlinear activation function. 
                 Defaults to "hardswish".
             initializer (str | Callable[[Tensor], Tensor], optional): Type of weight initializer. 
@@ -63,7 +63,6 @@ class Encoder(Module):
         self.factory_kwargs = factory_kwargs
         self.invert_residual_kwargs = {
             "expand_factor": expand_factor, 
-            "num_groups_norm": num_groups_norm, 
             "drop_p": drop_p,
             "activation": activation,
             "initializer": initializer,
@@ -71,6 +70,7 @@ class Encoder(Module):
         # MAIN COMPONENTS
         self._set_backbone(img_channels, activation)
         Encoder._reset_parameters(self)
+
 
     def _set_backbone(
         self,
@@ -103,10 +103,12 @@ class Encoder(Module):
             )
         self.layers = Sequential(*layers)
     
+    
     def _reset_parameters(self):
         self.initializer(self.layers[0][0].weight)
         if self.layers[0][0].bias is not None:
             ones_(self.layers[0][0].bias)
+
 
     def forward(self, input: Tensor) -> Tensor:
         return self.layers(input)
@@ -120,7 +122,6 @@ class Decoder(Module):
         up_channels: Sequence[int],
         expand_factor: int,
         drop_p: float = 0.3,
-        num_groups_norm: int = 4,
         activation: str = "hardswish",
         initializer: str | Callable[[Tensor], Tensor] = "he_uniform",
         device=None,
@@ -137,7 +138,6 @@ class Decoder(Module):
             up_channels (Sequence[int]): Sequence of channels along stages of Decoder
             expand_factor (int, optional): Coeficient which is used to expand number of channels.
             drop_p (float, optional): Dropout rate. Defaults to 0.3.
-            num_groups_norm (int, optional): Number of group for GN layer. Defaults to 4.
             activation (str, optional): Type of nonlinear activation function. 
                 Defaults to "hardswish".
             initializer (str | Callable[[Tensor], Tensor], optional): Type of weight initializer. 
@@ -156,7 +156,6 @@ class Decoder(Module):
         self.invert_residual_kwargs = {
             "expand_factor": expand_factor, 
             "drop_p": drop_p,
-            "num_groups_norm": num_groups_norm, 
             "activation": activation,
             "initializer": initializer,
         }
@@ -165,11 +164,12 @@ class Decoder(Module):
         self._set_backbone(activation, img_channels)
         Decoder._reset_parameters(self)
         
+        
     def _set_backbone(
         self,
         activation,
-        img_channels
-    ):
+        img_channels,
+    ):            
         layers = []
         projection = [
             ConvTranspose2d(
@@ -186,8 +186,10 @@ class Decoder(Module):
                 out_channels=self.latent_dim,
                 kernel_size=1,
                 padding=(0, 0),
+                bias=False,
                 **self.factory_kwargs
             ),
+            BatchNorm2d(self.latent_dim, **self.factory_kwargs),
             get_activation(self.activation, **self.factory_kwargs),
         ]
         layers.extend(projection)
@@ -213,16 +215,18 @@ class Decoder(Module):
                     **self.factory_kwargs
                 ),
                 get_activation(activation, **self.factory_kwargs),
-                # pointwise
+                # projection
                 Conv2d(
                     self.up_channels[-1], 
                     img_channels, 
-                    kernel_size=1, 
+                    kernel_size=3, 
+                    padding=(1, 1),
                     **self.factory_kwargs
                 ),
             )
         )
         self.layers = Sequential(*layers)
+    
     
     def _reset_parameters(self):
         self.initializer(self.layers[0].weight)   
@@ -231,15 +235,18 @@ class Decoder(Module):
         self.initializer(self.layers[-1][2].weight)        
         if self.layers[0].bias is not None:
             ones_(self.layers[0].bias)
-            ones_(self.layers[2].bias)
             ones_(self.layers[-1][0].bias)
-            ones_(self.layers[-1][2].bias)     
+            zeros_(self.layers[-1][2].bias) 
+        if self.layers[2].bias is not None:
+            ones_(self.layers[2].bias)    
+    
     
     def forward(
         self, 
         input: Tensor,
     ) -> Tensor:
         return self.layers(input)
+    
     
     @torch.no_grad()
     def sample(
