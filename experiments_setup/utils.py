@@ -164,7 +164,7 @@ def set_ddp(rank: int, world_size: int) -> None:
         world_size=world_size
     )
     if rank == 0:
-        time.sleep(50)
+        time.sleep(30)
         
 
 def set_env() -> None:
