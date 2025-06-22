@@ -1,6 +1,6 @@
 from typing import Tuple
 
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from torch.utils.data.distributed import DistributedSampler
 
 from datasets import *
@@ -16,7 +16,7 @@ def _get_dataset(
     dataset: str,
     *args,
     **kwargs
-):
+) -> Dataset:
     AVAILABLE_DATASETS = {
         "flowers102": ConcatDataset([
             flowers102.Flowers102AE(transform=CustomAug(*args, **kwargs), split=split)
@@ -29,23 +29,24 @@ def _get_dataset(
         return AVAILABLE_DATASETS[dataset]
     except KeyError:
         raise KeyError(
-            f"Dataset must be one of these {list(AVAILABLE_DATASETS.keys)}, got {dataset} instead"
+            f"Dataset must be one of these {list(AVAILABLE_DATASETS.keys())}, got {dataset} instead"
         )
 
 def get_dataloader(
     dataset: str,
     is_ddp: bool,
     batch_size: int,
-    *args, 
-    **kwargs
+    *dataset_args, 
+    **dataset_kwargs
 ) -> DataLoader:
+    ds = _get_dataset(dataset, *dataset_args, **dataset_kwargs)
     dataloader_kwargs = {
+        "dataset": ds,
         "batch_size": batch_size,
         "shuffle": False if is_ddp else True,
-        "sampler": DistributedSampler(dataset) if is_ddp else None,
+        "sampler": DistributedSampler(ds) if is_ddp else None,
         "num_workers": NUM_WORKERS,
         "drop_last": IS_DROP_LAST,
         "pin_memory": IS_PIN_MEMORY,
     }
-    dataset = _get_dataset(dataset, *args, **kwargs)
-    return DataLoader(dataset=dataset, **dataloader_kwargs)
+    return DataLoader(**dataloader_kwargs)
