@@ -1,18 +1,27 @@
 import torch
+import torch.nn as nn
 from torch.nn import (
     Parameter,
     Module,
-    Sigmoid,
-    Tanh,
-    Hardsigmoid,
-    ReLU,
-    ReLU6, 
-    SELU,
-    GELU,
-    SiLU,
 )
 import torch.nn.functional as F
 
+
+class Sigmoid(nn.Sigmoid):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        
+
+class Hardsigmoid(nn.Hardsigmoid):
+    def __init__(self, inplace = False, *args, **kwargs):
+        super().__init__(inplace)
+
+
+class Tanh(nn.Tanh):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        
+        
 class Swish(Module):
     def __init__(
         self,
@@ -52,6 +61,42 @@ class HardSwish(Module):
         
     def forward(self, input):
         return input * F.hardsigmoid(self.beta*input)
+        
+        
+class ReLU(nn.ReLU):
+    def __init__(self, inplace = False, *args, **kwargs):
+        super().__init__(inplace)
+        
+
+class ReLU6(nn.ReLU6):
+    def __init__(self, inplace = False, *args, **kwargs):
+        super().__init__(inplace)
+        
+    
+class LeakyReLU(nn.LeakyReLU):
+    def __init__(
+        self, 
+        negative_slope = 0.05, 
+        inplace = False, 
+        *args, 
+        **kwargs
+    ):
+        super().__init__(negative_slope, inplace)
+
+
+class SELU(nn.SELU):
+    def __init__(self, inplace = False, *args, **kwargs):
+        super().__init__(inplace)
+        
+        
+class GELU(nn.GELU):
+    def __init__(self, approximate = "none", *args, **kwargs):
+        super().__init__(approximate)
+        
+        
+class SiLU(nn.SiLU):
+    def __init__(self, inplace = False, *args, **kwargs):
+        super().__init__(inplace)
     
     
 ACTIVATIONS = {
@@ -62,9 +107,10 @@ ACTIVATIONS = {
     "hardswish": HardSwish,
     "relu": ReLU,
     "relu6": ReLU6,
+    "leaky_relu": LeakyReLU,
     "selu": SELU,
     "gelu": GELU,
-    "SiLU": SiLU,
+    "silu": SiLU,
 }
 
 
