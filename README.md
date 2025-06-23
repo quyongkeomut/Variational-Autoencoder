@@ -2,6 +2,7 @@
 
 [![Static Badge](https://img.shields.io/badge/Python-3.10.14-blue.svg)](https://www.python.org/) 
 [![Static Badge](https://img.shields.io/badge/PyTorch-2.5.1-orange.svg)]([https://www.python.org/](https://pytorch.org/get-started/locally/))
+[![Static Badge](https://img.shields.io/badge/License-Apache2.0-red.svg)]([https://www.python.org/](https://github.com/quyongkeomut/Variational-Autoencoder/blob/main/LICENSE.md))
 
 **Update 23/06/2025: Added gradient accumulation logic for the training stage**
 
