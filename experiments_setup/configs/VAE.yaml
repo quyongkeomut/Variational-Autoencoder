@@ -4,32 +4,34 @@ NAME: "VAE"
 IMG_CHANNELS: 3
 
 
-LATENT_DIM: 384
+LATENT_DIM: 512
 
 
 ENCODER_CONFIGS:
   down_channels: [32, 64, 128, 256]
-  expand_factor: 2
-  drop_p: 0.4
-  num_groups_norm: 8
-  activation: "swish"
+  expand_factor: 3
+  drop_p: 0.1
+  activation: "leaky_relu"
+  initializer: "he_uniform"
   dtype: null
 
 
 DECODER_CONFIGS: 
-  up_channels: [256, 128, 64, 32, 32]
-  expand_factor: 2
-  drop_p: 0.3
-  num_groups_norm: 8
-  activation: "swish"
+  up_channels: [256, 192, 96, 48, 32]
+  expand_factor: 3
+  drop_p: 0.0
+  activation: "leaky_relu"
+  initializer: "he_uniform"
   dtype: null
 
 
-OPTIMIZER_NAME: "adamw"
+OPTIMIZER_NAME: "adam"
 
 
-OPTIM_KWARGS: {}
+OPTIM_KWARGS: 
+  weight_decay: 0
 
 
 LOGGING_KWARGS:
-  save_dir: "/kaggle/working/weights/VAE"
+  save_dir: ./weights/VAE
+  # save_dir: "/kaggle/working/weights/VAE"
