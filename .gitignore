@@ -1,6 +1,8 @@
-data*/
-/ Do not ignore the 'datasets' folder
+# Do not ignore the 'datasets' folder
 !datasets/
+!requirements.txt
+
+data*/
 weights/
 env/
 docs/
