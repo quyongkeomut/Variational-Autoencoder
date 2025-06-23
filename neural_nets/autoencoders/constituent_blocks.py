@@ -129,8 +129,6 @@ class UpBlock(Module):
         """
         super().__init__()
         invert_residual_kwargs = {
-            "in_channels": out_channels,
-            "out_channels": out_channels,
             "expand_factor": expand_factor, 
             "drop_p": drop_p,
             "activation": activation,
@@ -152,17 +150,17 @@ class UpBlock(Module):
             BatchNorm2d(in_channels, **factory_kwargs),
             get_activation(activation),
             Conv2d(
-                in_channels, 
-                out_channels,
+                in_channels=in_channels,
+                out_channels=in_channels,
                 kernel_size=3,
                 padding=(1, 1),
                 bias=False,
                 **factory_kwargs
             ),
-            BatchNorm2d(out_channels, **factory_kwargs),
+            BatchNorm2d(in_channels, **factory_kwargs),
             get_activation(activation),
-            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
-            SeparableInvertResidual(**invert_residual_kwargs, **factory_kwargs),
+            SeparableInvertResidual(in_channels, out_channels, **invert_residual_kwargs, **factory_kwargs),
+            SeparableInvertResidual(out_channels, out_channels, **invert_residual_kwargs, **factory_kwargs),
         ]
         self.layers = Sequential(*layers)
         self._reset_parameters()
