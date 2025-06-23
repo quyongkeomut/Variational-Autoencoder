@@ -1,7 +1,7 @@
-from typing import Tuple
+from typing import Tuple, List, Any
     
 import torch
-from torch import Tensor
+from torch import Tensor, randn
 from torch.nn import (
     Sequential,
     Linear,
@@ -47,6 +47,7 @@ class VAEEncoder(Encoder):
                 out_features=self.latent_dim,
                 **self.factory_kwargs
             ),
+            get_activation("leaky_relu", **self.factory_kwargs)
         )
         self._reset_parameters()
     
@@ -59,9 +60,9 @@ class VAEEncoder(Encoder):
         self.initializer(self.log_var[2].weight)
     
         ones_(self.mean[0].bias)
-        zeros_(self.mean[2].bias)
+        ones_(self.mean[2].bias)
         ones_(self.log_var[0].bias)
-        zeros_(self.log_var[2].bias)
+        ones_(self.log_var[2].bias)
     
 
     def forward(self, input: Tensor) -> Tuple[Tensor, Tensor]:
@@ -81,6 +82,21 @@ class VAEDecoder(Decoder):
         super().__init__(*args, **kwargs)
         self.reconstruction_method = reconstruction_method
         
+        self.decoder_input = Sequential(
+            Linear(self.latent_dim, self.latent_dim*2, **self.factory_kwargs),
+            get_activation(self.activation, **self.factory_kwargs),
+            Linear(self.latent_dim*2, self.latent_dim, **self.factory_kwargs),
+        )
+        self._reset_parameters()
+        
+        
+    def _reset_parameters(self):
+        super()._reset_parameters()
+        self.initializer(self.decoder_input[0].weight)
+        ones_(self.decoder_input[0].bias)
+        self.initializer(self.decoder_input[2].weight)
+        ones_(self.decoder_input[2].bias)
+        
     
     def forward(self, input: Tensor) -> Tensor:
         """
@@ -95,7 +111,7 @@ class VAEDecoder(Decoder):
         Returns:
             Tensor: Reconstructed image
         """
-        Z = input # (N, d)
+        Z = self.decoder_input(input) # (N, d)
         Z = Z.view(-1, self.latent_dim, *self.latent_shape) # (N, C, H, W)
         return self.layers(Z)
     
@@ -104,19 +120,21 @@ class VAEDecoder(Decoder):
     def sample(
         self,
         num_samples: int,
-    ):
+    ) -> List[Any]:
         """
         Samples from the latent space and return the synthetic image
 
         Args:
             num_samples (int): Number of samples
         """
-        Z = torch.randn(num_samples, self.latent_dim, *self.latent_shape, **self.factory_kwargs) # (N, C, H, W)
-        outputs = self.layers(Z).detach().cpu()
+        latent_shape = (num_samples, self.latent_dim)
+        Z = randn(*latent_shape, **self.factory_kwargs) # (N, d)
+        
+        outputs = self.forward(Z).detach().cpu()
         if self.reconstruction_method == "bce":
             outputs = sigmoid(outputs)
         return [to_image(output) for output in outputs]
     
     
-    def generate(self):
+    def generate(self) -> Any:
         return self.sample(1)[0]
