@@ -13,7 +13,7 @@ class VAETrainer(BaseTrainer):
     
     def __init__(
         self, 
-        num_recon_ahead: int = 5,
+        num_recon_ahead: int = 1,
         *arg, 
         **kwargs
     ):
