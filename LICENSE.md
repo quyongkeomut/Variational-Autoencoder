@@ -1,8 +1,8 @@
 
                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
-		       Copyright Phuoc-Thinh Nguyen 2025
+                            Version 2.0, January 2004
+                         http://www.apache.org/licenses/
+		        Copyright Phuoc-Thinh Nguyen 2025
 			  thinhnguyen.7062@gmail.com
 
    TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
