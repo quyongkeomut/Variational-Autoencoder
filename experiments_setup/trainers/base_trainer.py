@@ -42,6 +42,7 @@ class BaseTrainer:
         start_epoch: int = 0,
         lr_scheduler: Optional[Any] = None,
         gpu_id: int = 0,
+        gradient_accumulation_steps: int = 3,
         *args,
         **kwargs
     ) -> None:
@@ -63,6 +64,7 @@ class BaseTrainer:
             lr_scheduler (Optional[CosineAnnealingLR], optional): Learning rate scheduler. 
                 Defaults to None.
             gpu_id (int, optional): GPU index. Defaults to 0.
+            gradient_accumulation_steps (int, optional): Steps to accumulate gradient
         """
         self.is_ddp = is_ddp 
         self.gpu_id = gpu_id
@@ -70,6 +72,7 @@ class BaseTrainer:
         self.num_epochs = num_epochs
         self.start_epoch = start_epoch
         self.save_encoder = save_encoder
+        self.gradient_accumulation_steps = gradient_accumulation_steps
         
         # setup model and ema model
         self.encoder = encoder.to(gpu_id)
@@ -201,11 +204,7 @@ class BaseTrainer:
             )
         
     
-    def _run_one_step(self, data: Tuple[Tensor, Any]) -> Dict[str, Tensor]:
-        # clear gradient
-        self.encoder.zero_grad(set_to_none=True)
-        self.decoder.zero_grad(set_to_none=True)
-        
+    def _forward_pass(self, data: Tuple[Tensor, Any]) -> Dict[str, Tensor]:
         # get data
         inputs = data[0].to(self.gpu_id)
             
@@ -215,8 +214,36 @@ class BaseTrainer:
         _losses = self.criterion(self.decoder, encoder_outputs, inputs)
         return _losses
 
+    
+    def _optimize_step(
+        self, 
+        data_idx: int,
+        data: Tuple[Tensor, Any]
+    ) -> Dict[str, Tensor]:
+        # Forward pass
+        _losses = self._forward_pass(data)
+        
+        # Backward pass
+        _loss = _losses["Loss"]
+        _loss.backward(retain_graph=True)
+        
+        # Accumulate gradient and Optimize step
+        if self._current_gradient_step % self.gradient_accumulation_steps == 0:
+            self.optimizer.step()
+            
+            # clear gradient
+            self.decoder.zero_grad(set_to_none=True)
+            self.encoder.zero_grad(set_to_none=True)
+            
+        self._current_gradient_step += 1
+        return _losses
+    
 
     def _on_train_epoch_begin(self, epoch: int) -> None:
+        # clear gradient
+        self.decoder.zero_grad(set_to_none=True)
+        self.encoder.zero_grad(set_to_none=True)
+        
         self.decoder.train()
         self.encoder.train()
         
@@ -234,17 +261,13 @@ class BaseTrainer:
             metric_key: None for metric_key in self.METRIC_KEYS
         }
         pb = tqdm.tqdm(total=len(self.train_loader), desc=f'Epoch {epoch+1}/{self.num_epochs}', unit='batch')
+        self._current_gradient_step = 1
         
         with pb if self.gpu_id == 0 else nullcontext() as pbar:
-            for data in self.train_loader:
+            for i, data in enumerate(self.train_loader):
                 
-                # Forward pass
-                _losses = self._run_one_step(data)
-                _loss = _losses["Loss"]
-                
-                # Optimization step
-                _loss.backward(retain_graph=True)
-                self.optimizer.step()
+                # Forward pass and Optimization step
+                _losses = self._optimize_step(i, data)
                 
                 # Update metrics and progress bar
                 if self.gpu_id == 0:
