@@ -116,7 +116,7 @@ If you would like to contribute your model, feel free to submit a Pull Request.
 
 ## **License**
 
-This repository is released under the Apache License 2.9. See the **[LICENSE]()** file for details.
+This repository is released under the Apache License 2.9. See the **[LICENSE](LICENSE.md)** file for details.
 
 ## **Citation**
 
